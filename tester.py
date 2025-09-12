@@ -1,7 +1,7 @@
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
-import re
+import shlex
 
 def parse_accounts_line(line):
     line = line.strip()
@@ -24,10 +24,11 @@ def parse_accounts_line(line):
 def test_account(account_url):
     """
     Jalankan trojan-go headless untuk cek login.
+    Memanggil subprocess tanpa shell=True.
     """
-    cmd = f"trojan-go client -s {account_url} -p 0 --headless"
+    cmd_list = shlex.split(f"trojan-go client -s {account_url} -p 0 --headless")
     try:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15)
+        result = subprocess.run(cmd_list, capture_output=True, text=True, timeout=15)
         if result.returncode == 0:
             return account_url
     except Exception as e:
@@ -47,7 +48,7 @@ def main():
 
     active_accounts = []
 
-    # Tes paralel
+    # Tes paralel (max 5 akun sekaligus)
     with ThreadPoolExecutor(max_workers=5) as executor:
         future_to_acc = {executor.submit(test_account, acc): acc for acc in accounts}
         for future in as_completed(future_to_acc):
