@@ -1,0 +1,45 @@
+name: Test Trojan Accounts
+
+on:
+  workflow_dispatch:  # Bisa dijalankan manual
+  schedule:
+    - cron: '0 0 */3 * *'  # Jalankan setiap 3 hari pukul 00:00 UTC
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - results.txt   # Hindari loop commit
+
+jobs:
+  test_accounts:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout repo
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # Setup Python
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      # Install dependency
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      # Jalankan tester.py
+      - name: Run Trojan tester
+        run: python tester.py
+
+      # Commit dan push hasil aktif ke repo
+      - name: Commit results to repo
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add results.txt
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update active accounts"
+          git push
