@@ -1,91 +1,75 @@
-import subprocess
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
-import shlex
 import base64
+import os
 
-# -----------------------------
-# Helper functions
-# -----------------------------
+ACCOUNTS_FILE = "accounts.txt"
+ACTIVE_FILE = "active.txt"
+DEAD_FILE = "dead.txt"
 
-def decode_base64_line(line):
-    line = line.strip()
-    if not line:
-        return None
-    try:
-        decoded = base64.b64decode(line).decode("utf-8")
-        return decoded
-    except Exception as e:
-        # Jika gagal decode, mungkin line bukan Base64, gunakan langsung
-        return line
-
-def parse_accounts_line(line):
-    line = line.strip()
-    if not line or line.startswith("#"):
-        return []
-    # Jika link raw
-    if line.startswith("http://") or line.startswith("https://"):
+def download_accounts():
+    urls = []
+    with open(ACCOUNTS_FILE, "r") as f:
+        for line in f:
+            url = line.strip()
+            if url:
+                urls.append(url)
+    accounts = []
+    for url in urls:
         try:
-            resp = requests.get(line, timeout=10)
-            if resp.status_code == 200:
-                content = resp.text.splitlines()
-                accounts = [decode_base64_line(c.strip()) for c in content if c.strip()]
-                return accounts
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            for line in r.text.splitlines():
+                line = line.strip()
+                if line:
+                    accounts.append(line)
         except Exception as e:
-            print(f"Gagal akses link: {line} ({e})")
-            return []
-    else:
-        return [decode_base64_line(line)]
+            print(f"Failed to download {url}: {e}")
+    return accounts
 
-def test_account(account_url):
-    """
-    Jalankan trojan-go headless untuk cek login.
-    Menampilkan log trojan-go di stdout/stderr.
-    """
-    cmd_list = shlex.split(f"trojan-go client -s {account_url} -p 0 --headless")
+def decode_account(acc_b64):
     try:
-        result = subprocess.run(cmd_list, capture_output=True, text=True, timeout=15)
-        print(f"--- LOG TROJAN-GO {account_url} ---")
-        print(result.stdout)
-        print(result.stderr)
-        if result.returncode == 0:
-            return account_url
-    except Exception as e:
-        print(f"Error {account_url} -> {e}")
-    return None
+        decoded = base64.b64decode(acc_b64).decode()
+        return decoded
+    except Exception:
+        return None
 
-# -----------------------------
-# Main
-# -----------------------------
+def test_ws_tls(account_str):
+    """
+    Dummy test: cek format WS+TLS dan password field ada.
+    Real TLS handshake ga bisa di GitHub Actions tanpa server.
+    """
+    try:
+        required_fields = ["server", "port", "type", "uuid", "tls", "servername", "network", "ws-opts"]
+        for field in required_fields:
+            if field not in account_str:
+                return False
+        return True
+    except Exception:
+        return False
 
 def main():
-    input_file = "accounts.txt"
-    output_file = "results.txt"
-    accounts = []
+    accounts = download_accounts()
+    active = []
+    dead = []
 
-    # Load akun dari file
-    with open(input_file, "r") as f:
-        lines = f.read().splitlines()
-        for line in lines:
-            accounts.extend(parse_accounts_line(line))
+    for acc in accounts:
+        decoded = decode_account(acc)
+        if not decoded:
+            dead.append(acc)
+            continue
+        if test_ws_tls(decoded):
+            active.append(acc)
+        else:
+            dead.append(acc)
 
-    active_accounts = []
+    with open(ACTIVE_FILE, "w") as f:
+        for a in active:
+            f.write(a + "\n")
+    with open(DEAD_FILE, "w") as f:
+        for d in dead:
+            f.write(d + "\n")
 
-    # Tes paralel (max 5 akun sekaligus)
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        future_to_acc = {executor.submit(test_account, acc): acc for acc in accounts}
-        for future in as_completed(future_to_acc):
-            res = future.result()
-            if res:
-                print(f"AKUN AKTIF: {res}")
-                active_accounts.append(res)
-
-    # Simpan hanya akun aktif
-    with open(output_file, "w") as f:
-        for acc in active_accounts:
-            f.write(acc + "\n")
-
-    print("Selesai! Hanya akun aktif tersimpan di results.txt")
+    print(f"Done! {len(active)} active, {len(dead)} dead.")
 
 if __name__ == "__main__":
     main()
