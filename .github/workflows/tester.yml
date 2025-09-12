@@ -1,42 +1,33 @@
 name: Test Trojan Accounts
 
 on:
-  workflow_dispatch:  # Bisa dijalankan manual
+  workflow_dispatch:
   schedule:
-    - cron: '0 0 */3 * *'  # Jalankan setiap 3 hari pukul 00:00 UTC
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - results.txt   # Hindari loop commit
+    - cron: '0 0 */3 * *' # setiap 3 hari
 
 jobs:
   test_accounts:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout repo
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      # Setup Python
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.11"
+      - name: Setup Trojan-Go
+        run: |
+          curl -L https://github.com/p4gefau1t/trojan-go/releases/latest/download/trojan-go-linux-amd64.zip -o trojan-go.zip
+          unzip trojan-go.zip
+          chmod +x trojan-go
+          mv trojan-go /usr/local/bin/
 
-      # Install dependency
-      - name: Install dependencies
+      - name: Install Python
         run: |
           python -m pip install --upgrade pip
           pip install requests
 
-      # Jalankan tester.py
-      - name: Run Trojan tester
+      - name: Run tester
         run: python tester.py
 
-      # Commit dan push hasil aktif ke repo
-      - name: Commit results to repo
+      - name: Commit results
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
