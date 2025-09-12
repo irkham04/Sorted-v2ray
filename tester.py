@@ -1,100 +1,67 @@
-import re
-import requests
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import requests
+import re
 
-# ========================
-# Helper functions
-# ========================
+def parse_accounts_line(line):
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return []
+    # Jika link raw
+    if line.startswith("http://") or line.startswith("https://"):
+        try:
+            resp = requests.get(line, timeout=10)
+            if resp.status_code == 200:
+                content = resp.text.splitlines()
+                accounts = [c.strip() for c in content if c.strip()]
+                return accounts
+        except Exception as e:
+            print(f"Gagal akses link: {line} ({e})")
+            return []
+    else:
+        return [line]
 
-def parse_trojan(url):
+def test_account(account_url):
     """
-    Parse trojan://password@host:port
+    Jalankan trojan-go headless untuk cek login.
     """
-    pattern = r"trojan://(.+)@(.+):(\d+)"
-    match = re.match(pattern, url)
-    if match:
-        return {"password": match.group(1), "host": match.group(2), "port": int(match.group(3)), "url": url}
-    return None
-
-def test_account(account):
-    """
-    Tes koneksi Trojan menggunakan openssl.
-    Hanya kembalikan URL jika akun aktif.
-    """
-    host = account["host"]
-    port = account["port"]
-    cmd = f"echo | openssl s_client -connect {host}:{port} -crlf"
+    cmd = f"trojan-go client -s {account_url} -p 0 --headless"
     try:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
-        if "CONNECTED" in result.stdout or "SSL handshake" in result.stdout:
-            return account["url"]  # Akun aktif
-    except:
-        pass
-    return None  # Akun mati
-
-# ========================
-# Load accounts from file
-# ========================
-
-def load_accounts(file_path):
-    """
-    Baca accounts.txt
-    - Sub-URL langsung
-    - Link yang berisi banyak akun
-    """
-    accounts = []
-    with open(file_path, "r") as f:
-        lines = f.read().splitlines()
-
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        # Jika line adalah link
-        if line.startswith("http://") or line.startswith("https://"):
-            try:
-                resp = requests.get(line, timeout=10)
-                if resp.status_code == 200:
-                    content = resp.text.splitlines()
-                    for subline in content:
-                        acc = parse_trojan(subline.strip())
-                        if acc:
-                            accounts.append(acc)
-            except Exception as e:
-                print(f"Gagal akses link: {line} ({e})")
-        else:
-            acc = parse_trojan(line)
-            if acc:
-                accounts.append(acc)
-    return accounts
-
-# ========================
-# Main
-# ========================
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15)
+        if result.returncode == 0:
+            return account_url
+    except Exception as e:
+        print(f"Error {account_url} -> {e}")
+    return None
 
 def main():
     input_file = "accounts.txt"
     output_file = "results.txt"
+    accounts = []
 
-    accounts = load_accounts(input_file)
+    # Load akun dari file
+    with open(input_file, "r") as f:
+        lines = f.read().splitlines()
+        for line in lines:
+            accounts.extend(parse_accounts_line(line))
+
     active_accounts = []
 
     # Tes paralel
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        future_to_account = {executor.submit(test_account, acc): acc for acc in accounts}
-        for future in as_completed(future_to_account):
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_acc = {executor.submit(test_account, acc): acc for acc in accounts}
+        for future in as_completed(future_to_acc):
             res = future.result()
             if res:
                 print(res)
                 active_accounts.append(res)
 
-    # Simpan hanya akun aktif ke results.txt
+    # Simpan hanya akun aktif
     with open(output_file, "w") as f:
-        for line in active_accounts:
-            f.write(line + "\n")
+        for acc in active_accounts:
+            f.write(acc + "\n")
 
-    print(f"\nSelesai! Hanya akun aktif tersimpan di {output_file}")
+    print("Selesai! Hanya akun aktif tersimpan di results.txt")
 
 if __name__ == "__main__":
     main()
