@@ -1,68 +1,47 @@
-name: Sort & Test Trojan Accounts
+name: Sort & Check Trojan Accounts (WS only)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
   push:
     branches: [ main ]
 
 jobs:
-  run:
+  sort:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      - name: Install Python deps
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip requests
 
       - name: Install Ookla Speedtest CLI
         run: |
-          set -e
-          URL="https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz"
-          echo "Downloading Speedtest CLI..."
-          if curl -L --fail "$URL" -o speedtest.tgz; then
-            tar -xvzf speedtest.tgz
-            sudo mv speedtest /usr/local/bin/
-            echo "Installed speedtest from tarball"
-          else
-            echo "Tarball failed, installing via apt..."
-            sudo apt-get update
-            sudo apt-get install -y speedtest
-          fi
-          speedtest --version
+          curl -L -o speedtest.tgz https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz
+          tar -xvzf speedtest.tgz
+          mv speedtest speedtest-cli
+          mv speedtest-cli/speedtest ./speedtest
+          chmod +x ./speedtest
 
-      - name: Install Xray-core
+      - name: Run Trojan sorter & checker
         run: |
-          XRAY_VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep tag_name | cut -d '"' -f4)
-          curl -L https://github.com/XTLS/Xray-core/releases/download/$XRAY_VER/Xray-linux-64.zip -o xray.zip
-          sudo apt-get update && sudo apt-get install -y unzip
-          unzip xray.zip -d xray
-          sudo mv xray/xray /usr/local/bin/xray
-          sudo chmod +x /usr/local/bin/xray
-          xray --version
+          python check_trojan_runner.py --input input.txt --sorted sorted.txt --active active.txt
 
-      - name: Run checker (sort + speedtest)
-        run: |
-          python check_trojan_runner.py \
-            --input input.txt \
-            --output sorted.txt \
-            --only-ws \
-            --require-sni-host \
-            --check-active
-
-      - name: Commit results
+      - name: Commit sorted & active output
         uses: EndBug/add-and-commit@v9
         with:
           author_name: github-actions[bot]
           author_email: 41898282+github-actions[bot]@users.noreply.github.com
-          message: "update: sorted & active Trojan accounts"
+          message: "update: sorted & active Trojan accounts (with speedtest)"
           add: 'sorted.txt active.txt'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
