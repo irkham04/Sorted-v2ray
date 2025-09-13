@@ -35,8 +35,8 @@ def run_speedtest_py(ip, timeout=10, delay=1):
     print(f"[INFO] Speedtest untuk IP {ip} ...")
     try:
         st = speedtest.Speedtest()
-        servers = st.get_servers([])        # ambil semua server
-        best = st.get_best_server(servers) # pilih server terbaik
+        servers = st.get_servers([])
+        best = st.get_best_server(servers)
         ping = best['latency']
         isp = st.results.client.get('isp', 'Unknown ISP')
         print(f"# ISP: {isp} | Ping: {ping} ms")
@@ -58,17 +58,20 @@ def main():
         accounts = fetch_and_decode(url)
         all_accounts.extend(accounts)
 
-    sorted_lines = []
-    active_lines = []
-
-    for idx, acc in enumerate(all_accounts):
-        print(f"[INFO] Memproses akun {idx+1}/{len(all_accounts)}")
-
+    # filter akun dulu agar counter [INFO] akurat
+    filtered_accounts = []
+    for acc in all_accounts:
         if args.only_ws and "type=ws" not in acc.lower():
             continue
         if args.require_sni_host and ("sni=" not in acc.lower() or "host=" not in acc.lower()):
             continue
+        filtered_accounts.append(acc)
 
+    sorted_lines = []
+    active_lines = []
+
+    for idx, acc in enumerate(filtered_accounts):
+        print(f"[INFO] Memproses akun {idx+1}/{len(filtered_accounts)}")
         ip = extract_ip(acc)
         if not ip:
             continue
