@@ -13,7 +13,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: python3 -m pip install --upgrade pip
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install requests
 
       - name: Jalankan sort WS accounts
         run: |
