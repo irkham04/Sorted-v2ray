@@ -65,16 +65,33 @@ def main():
     print(f"[INFO] sorted.txt dibuat: {len(valid_accounts)} akun valid")
 
     # tulis active.txt
+    tested_ips = set()
     with open("active.txt", "w") as f:
         f.write("# Akun aktif dengan info speedtest (baris info diawali #)\n\n")
         for i, acc in enumerate(valid_accounts, start=1):
             f.write(acc + "\n")
+
+            # ambil IP
+            try:
+                ip = acc.split("@")[1].split(":")[0]
+            except Exception:
+                ip = None
+
+            if ip and ip in tested_ips:
+                f.write(f"# IP {ip} sudah dites, skip speedtest\n\n")
+                continue
+
+            info = run_speedtest(args.speedtest_bin)
+            f.write(info + "\n\n")
+
+            if ip:
+                tested_ips.add(ip)
+
             if i % args.batch_size == 0:
                 print(f"[INFO] Batch {i//args.batch_size} selesai, delay {args.delay}s")
                 time.sleep(args.delay)
-            info = run_speedtest(args.speedtest_bin)
-            f.write(info + "\n\n")
-    print(f"[INFO] active.txt dibuat dengan speedtest untuk tiap akun")
+
+    print(f"[INFO] active.txt dibuat dengan speedtest tiap akun unik per IP")
 
 if __name__ == "__main__":
     main()
