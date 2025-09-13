@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
-import argparse, re, time, requests, base64, sys
-import speedtest  # pip install speedtest-cli
+import argparse, base64, re, requests, sys, time
+import ssl
+import socket
+from urllib.parse import urlparse, parse_qs
+try:
+    import websocket
+except ImportError:
+    print("websocket-client belum terinstall. Jalankan: pip install websocket-client")
+    sys.exit(1)
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
     parser.add_argument("--sorted", required=True)
     parser.add_argument("--active", required=True)
-    parser.add_argument("--only-ws", action="store_true")
     parser.add_argument("--require-sni-host", action="store_true")
-    parser.add_argument("--delay", type=int, default=1)
-    parser.add_argument("--timeout", type=int, default=10)
+    parser.add_argument("--delay", type=float, default=1)
+    parser.add_argument("--timeout", type=float, default=5)
     return parser.parse_args()
 
 def fetch_and_decode(url):
     try:
-        r = requests.get(url.strip(), timeout=20)
+        r = requests.get(url.strip(), timeout=10)
         r.raise_for_status()
         content = r.text.strip()
         try:
@@ -27,85 +33,75 @@ def fetch_and_decode(url):
         print(f"[ERROR] gagal fetch {url}: {e}", file=sys.stderr)
         return []
 
-def extract_ip(url):
-    match = re.search(r"@([\w\.-]+):(\d+)", url)
-    return match.group(1) if match else None
+def parse_trojan_ws(line, require_sni_host=False):
+    if not line.lower().startswith("trojan://"):
+        return None
+    parsed = urlparse(line)
+    qs = parse_qs(parsed.query)
+    type_ws = qs.get("type", [""])[0].lower() == "ws"
+    has_sni = "sni" in qs and qs["sni"][0].strip()
+    has_host = "host" in qs and qs["host"][0].strip()
+    if require_sni_host and not (has_sni and has_host):
+        return None
+    if type_ws:
+        return {
+            "line": line,
+            "host": qs.get("host", [""])[0],
+            "port": parsed.port,
+            "path": qs.get("path", ["/"])[0],
+            "sni": qs.get("sni", [""])[0]
+        }
+    return None
 
-def run_speedtest_py(ip, timeout=10, delay=1):
-    print(f"[INFO] Speedtest untuk IP {ip} ...")
+def check_ws(account, timeout=5):
+    url = f"wss://{account['host']}:{account['port']}{account['path']}"
     try:
-        st = speedtest.Speedtest()
-        st.get_servers([])
-
-        # Ambil server terbaik
-        best = st.get_best_server()
-
-        # Periksa tipe best
-        if isinstance(best, dict):
-            ping = best.get('latency', '?')
-        elif isinstance(best, (float, int)):
-            ping = best
-        else:
-            ping = "?"
-
-        isp = st.results.client.get('isp', 'Unknown ISP')
-        print(f"# ISP: {isp} | Ping: {ping} ms")
-        return {"isp": isp, "ping": ping, "ip": ip}
-
+        start = time.time()
+        ws = websocket.create_connection(
+            url,
+            timeout=timeout,
+            sslopt={"server_hostname": account["sni"], "cert_reqs": ssl.CERT_NONE}
+        )
+        ws.close()
+        latency = int((time.time() - start)*1000)
+        return True, latency
     except Exception as e:
-        print(f"# Speedtest gagal: {e}")
-        return {"error": str(e), "isp": "Unknown", "ping": "?", "ip": ip}
-    finally:
-        time.sleep(delay)
+        return False, str(e)
 
 def main():
     args = parse_args()
     all_accounts = []
 
-    # fetch & decode
     with open(args.input) as f:
         urls = [l.strip() for l in f if l.strip()]
     for url in urls:
-        accounts = fetch_and_decode(url)
-        all_accounts.extend(accounts)
+        all_accounts.extend(fetch_and_decode(url))
 
-    # filter akun dulu agar counter [INFO] akurat
-    filtered_accounts = []
-    for acc in all_accounts:
-        if args.only_ws and "type=ws" not in acc.lower():
-            continue
-        if args.require_sni_host and ("sni=" not in acc.lower() or "host=" not in acc.lower()):
-            continue
-        filtered_accounts.append(acc)
+    ws_accounts = []
+    for line in all_accounts:
+        acc = parse_trojan_ws(line, args.require_sni_host)
+        if acc:
+            ws_accounts.append(acc)
 
     sorted_lines = []
     active_lines = []
 
-    for idx, acc in enumerate(filtered_accounts):
-        print(f"[INFO] Memproses akun {idx+1}/{len(filtered_accounts)}")
-        ip = extract_ip(acc)
-        if not ip:
-            continue
-
-        # run speedtest
-        result = run_speedtest_py(ip, timeout=args.timeout, delay=args.delay)
-
-        # simpan di sorted.txt
-        sorted_lines.append(acc)
-        if "error" in result:
-            sorted_lines.append(f"# Speedtest gagal: {result['error']}")
+    for idx, acc in enumerate(ws_accounts):
+        print(f"[INFO] Memproses akun {idx+1}/{len(ws_accounts)}")
+        sorted_lines.append(acc["line"])
+        active, info = check_ws(acc, timeout=args.timeout)
+        if active:
+            sorted_lines.append(f"# Status: Aktif | Ping: {info} ms")
+            active_lines.append(f"{acc['line']}\n# Status: Aktif | Ping: {info} ms")
         else:
-            sorted_lines.append(f"# ISP: {result.get('isp','Unknown')} | Ping: {result.get('ping','?')} ms")
+            sorted_lines.append(f"# Status: Tidak aktif | Info: {info}")
 
-        # simpan di active.txt hanya jika speedtest sukses
-        if "error" not in result:
-            info = f"{acc}\n# ISP: {result.get('isp','Unknown')} | Ping: {result.get('ping','?')} ms"
-            active_lines.append(info)
+        time.sleep(args.delay)
 
     with open(args.sorted, "w") as f:
-        f.write("\n".join(sorted_lines) + "\n")
+        f.write("\n".join(sorted_lines)+"\n")
     with open(args.active, "w") as f:
-        f.write("\n".join(active_lines) + "\n")
+        f.write("\n".join(active_lines)+"\n")
 
 if __name__ == "__main__":
     main()
