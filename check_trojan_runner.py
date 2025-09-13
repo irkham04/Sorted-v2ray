@@ -4,20 +4,22 @@ import websocket
 from urllib.parse import urlparse, parse_qs
 
 INPUT_FILE = "input.txt"
-OUTPUT_SNI = "results/sni.txt"
+OUTPUT_ACTIVE = "results/sni.txt"
 OUTPUT_LOG = "results/log.txt"
 
 MAX_RETRY = 2
-TIMEOUT = 20  # detik
+TIMEOUT = 20
 
 os.makedirs("results", exist_ok=True)
 
+# --------------------------
+# Ambil akun dari file input
+# --------------------------
 def fetch_accounts():
     accounts = []
     if not os.path.exists(INPUT_FILE):
         print(f"{INPUT_FILE} tidak ditemukan")
         return accounts
-
     with open(INPUT_FILE, "r") as f:
         for line in f:
             line = line.strip()
@@ -30,6 +32,9 @@ def fetch_accounts():
             accounts.extend([l.strip() for l in decoded.splitlines() if l.strip()])
     return accounts
 
+# ----------------------------------------
+# Cek query lengkap: type, host, path, sni/peer
+# ----------------------------------------
 def has_complete_query(url):
     parsed = urlparse(url)
     qs = parse_qs(parsed.query)
@@ -37,6 +42,9 @@ def has_complete_query(url):
     peer_present = "peer" in qs or "sni" in qs
     return all(k in qs for k in required_keys) and peer_present
 
+# --------------------------
+# Parsing Trojan URL
+# --------------------------
 def parse_trojan_url(url):
     parsed = urlparse(url)
     qs = parse_qs(parsed.query)
@@ -46,7 +54,10 @@ def parse_trojan_url(url):
     port = parsed.port or 443
     return port, peer, path, host_header
 
-def check_tls_ws_retry(host, port, peer, host_header):
+# --------------------------
+# Tes WS/TLS dengan retry
+# --------------------------
+def check_ws(host, port, peer, host_header):
     last_error = ""
     for attempt in range(1, MAX_RETRY + 1):
         try:
@@ -61,29 +72,34 @@ def check_tls_ws_retry(host, port, peer, host_header):
             return True
         except Exception as e:
             last_error = str(e)
-            print(f"Attempt {attempt}/{MAX_RETRY} failed: {last_error}", flush=True)
+            print(f"Attempt {attempt}/{MAX_RETRY} gagal: {last_error}")
     return last_error
 
+# --------------------------
+# Main
+# --------------------------
 def main():
     accounts = fetch_accounts()
     filtered = [a for a in accounts if has_complete_query(a)]
+    print(f"Total akun query lengkap: {len(filtered)}")
+
     active = []
     log_lines = []
 
     for i, acc in enumerate(filtered, 1):
         port, peer, path, host_header = parse_trojan_url(acc)
-        print(f"[{i}/{len(filtered)}] Testing {host_header}:{port} SNI={peer} ...", flush=True)
-        result = check_tls_ws_retry(host_header, port, peer, host_header)
+        print(f"[{i}/{len(filtered)}] Tes WS {host_header}:{port} SNI={peer} ...")
+        result = check_ws(host_header, port, peer, host_header)
         if result is True:
-            print("AKTIF ✅", flush=True)
+            print("AKTIF ✅")
             active.append(acc)
             log_lines.append(f"AKTIF: {acc}")
         else:
-            print("GAGAL ❌", flush=True)
+            print("GAGAL ❌")
             log_lines.append(f"GAGAL ({result}): {acc}")
 
-    # Simpan hasil aktif
-    with open(OUTPUT_SNI, "w") as f:
+    # Simpan akun aktif
+    with open(OUTPUT_ACTIVE, "w") as f:
         for acc in active:
             f.write(acc + "\n")
 
@@ -92,8 +108,9 @@ def main():
         for line in log_lines:
             f.write(line + "\n")
 
-    print(f"\nHasil akhir: {len(active)} akun aktif disimpan di {OUTPUT_SNI}", flush=True)
-    print(f"Log detail tersimpan di {OUTPUT_LOG}", flush=True)
+    print(f"\nTotal akun aktif: {len(active)}")
+    print(f"Hasil aktif disimpan di {OUTPUT_ACTIVE}")
+    print(f"Log detail disimpan di {OUTPUT_LOG}")
 
 if __name__ == "__main__":
     main()
