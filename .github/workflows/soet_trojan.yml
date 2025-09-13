@@ -1,47 +1,49 @@
-name: Sort & Check Trojan Accounts (WS only)
+name: Check Trojan Accounts
 
 on:
-  workflow_dispatch: {}
-  push:
-    branches: [ main ]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"   # jalan tiap 6 jam
 
 jobs:
-  sort:
+  check:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.x'
 
-      - name: Install dependencies
+      - name: Install Python deps
         run: |
-          python -m pip install --upgrade pip requests
+          pip install requests
 
       - name: Install Ookla Speedtest CLI
         run: |
-          curl -L -o speedtest.tgz https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz
-          tar -xvzf speedtest.tgz
-          mv speedtest speedtest-cli
-          mv speedtest-cli/speedtest ./speedtest
-          chmod +x ./speedtest
+          if [ ! -f ./speedtest ]; then
+            echo "⚡ Installing Ookla Speedtest CLI..."
+            curl -L -o speedtest.tgz https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz
+            tar -xvzf speedtest.tgz
+            mv speedtest ./speedtest
+            chmod +x ./speedtest
+          else
+            echo "✅ Speedtest CLI already installed, skipping..."
+          fi
 
-      - name: Run Trojan sorter & checker
+      - name: Run Trojan checker
         run: |
-          python check_trojan_runner.py --input input.txt --sorted sorted.txt --active active.txt
+          python check_trojan_runner.py \
+            --input accounts.txt \
+            --sorted sorted.txt \
+            --active active.txt \
+            --speedtest ./speedtest
 
-      - name: Commit sorted & active output
+      - name: Commit & push results
         uses: EndBug/add-and-commit@v9
         with:
-          author_name: github-actions[bot]
-          author_email: 41898282+github-actions[bot]@users.noreply.github.com
-          message: "update: sorted & active Trojan accounts (with speedtest)"
-          add: 'sorted.txt active.txt'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          add: "*.txt"
+          message: "update: sorted & active Trojan accounts"
+          default_author: github_actions
