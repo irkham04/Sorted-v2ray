@@ -1,4 +1,4 @@
-name: Trojan Check V2Ray
+name: Sort WS Trojan Accounts
 
 on:
   workflow_dispatch:
@@ -6,26 +6,24 @@ on:
     - cron: "0 */6 * * *"
 
 jobs:
-  check:
+  sort_ws:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: |
-          python3 -m pip install --upgrade pip
-          pip install requests websocket-client
+        run: python3 -m pip install --upgrade pip
 
-      - name: Run Trojan Checker
+      - name: Jalankan sort WS accounts
         run: |
           mkdir -p results
           python3 check_trojan_runner.py
 
-      - name: Commit results
+      - name: Commit hasil sortir
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add results/sni.txt results/log.txt
-          git commit -m "Update hasil cek Trojan TLS/WS sederhana" || echo "No changes"
+          git add results/sorted.txt
+          git commit -m "Update hasil sortir akun WS" || echo "No changes"
           git push
