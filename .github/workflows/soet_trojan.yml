@@ -1,4 +1,4 @@
-name: Sort & Check Trojan WS Accounts
+name: Sort & Check Trojan WS
 
 on:
   workflow_dispatch: {}
