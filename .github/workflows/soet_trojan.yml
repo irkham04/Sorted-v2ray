@@ -19,14 +19,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install --quiet requests
-
-      - name: Install Ookla Speedtest CLI
-        run: |
-          curl -sSL https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz -o speedtest.tgz
-          tar -xzf speedtest.tgz
-          mv speedtest ./speedtest-bin
-          chmod +x ./speedtest-bin
+        run: pip install --quiet requests speedtest-cli
 
       - name: Run Trojan sorter & speedtest
         run: |
@@ -36,7 +29,6 @@ jobs:
             --active active.txt \
             --only-ws \
             --require-sni-host \
-            --speedtest-bin ./speedtest-bin \
             --delay 1 || true
 
       - name: Commit results
