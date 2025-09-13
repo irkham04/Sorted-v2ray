@@ -13,6 +13,16 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v3
 
+      - name: List repo files (debug)
+        run: ls -R
+
+      - name: Verify script exists
+        run: |
+          if [ ! -f check_trojan.py ]; then
+            echo "ERROR: check_trojan.py tidak ditemukan di root repo!"
+            exit 1
+          fi
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -22,7 +32,7 @@ jobs:
         run: pip install requests websocket-client
 
       - name: Run Trojan account checker
-        run: python scripts/check_trojan.py
+        run: python check_trojan.py
 
       - name: Commit results
         run: |
