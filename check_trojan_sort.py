@@ -1,30 +1,27 @@
 import os
-import ssl
 import base64
-import requests
-import websocket
+import subprocess
 from urllib.parse import urlparse, parse_qs
 
 INPUT_FILE = "input.txt"
-OUTPUT_DIR = "results"
-OUTPUT_FILE = os.path.join(OUTPUT_DIR, "sni.txt")  # hasil akhir
+OUTPUT_FILE = "results/sni.txt"
+V2RAY_BIN = "./v2ray/v2ray"  # path v2ray binary di workflow
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs("results", exist_ok=True)
 
-def fetch_accounts_from_url(url):
-    try:
-        resp = requests.get(url, timeout=15)
-        resp.raise_for_status()
-        text = resp.text.strip()
-        try:
-            decoded = base64.b64decode(text).decode("utf-8")
-        except Exception:
-            decoded = text
-        lines = [line.strip() for line in decoded.splitlines() if line.strip()]
-        return [line for line in lines if line.startswith("trojan://")]
-    except Exception as e:
-        print(f"Gagal fetch {url}: {e}", flush=True)
-        return []
+def fetch_accounts():
+    accounts = []
+    with open(INPUT_FILE, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                decoded = base64.b64decode(line).decode("utf-8")
+            except Exception:
+                decoded = line
+            accounts.extend([l.strip() for l in decoded.splitlines() if l.strip()])
+    return accounts
 
 def has_complete_query(url):
     parsed = urlparse(url)
@@ -33,68 +30,73 @@ def has_complete_query(url):
     peer_present = "peer" in qs or "sni" in qs
     return all(k in qs for k in required_keys) and peer_present
 
-def parse_trojan_url(url):
-    parsed = urlparse(url)
-    qs = parse_qs(parsed.query)
-    host_header = qs.get("host", [parsed.hostname])[0]
-    peer = qs.get("sni", qs.get("peer", [host_header]))[0]
-    path = qs.get("path", [parsed.path or "/"])[0]
-    port = parsed.port or 443
-    return port, peer, path, host_header
+def test_with_v2ray(account):
+    # Buat config sementara per akun
+    config = {
+        "inbounds": [],
+        "outbounds": [
+            {
+                "protocol": "trojan",
+                "settings": {
+                    "servers": [
+                        {
+                            "address": urlparse(account).hostname,
+                            "port": urlparse(account).port or 443,
+                            "password": urlparse(account).username,
+                            "flow": "",
+                        }
+                    ]
+                },
+                "streamSettings": {
+                    "network": "ws",
+                    "wsSettings": {
+                        "path": parse_qs(urlparse(account).query).get("path", ["/"])[0],
+                        "headers": {
+                            "Host": parse_qs(urlparse(account).query).get("host", [urlparse(account).hostname])[0]
+                        }
+                    },
+                    "security": "tls"
+                }
+            }
+        ]
+    }
 
-def check_tls(host, port, peer, host_header):
+    import json, tempfile
+    with tempfile.NamedTemporaryFile(mode="w", delete=False) as tf:
+        json.dump(config, tf)
+        tf_path = tf.name
+
     try:
-        ws_url = f"wss://{host}:{port}/"
-        ws = websocket.create_connection(
-            ws_url,
-            sslopt={
-                "cert_reqs": ssl.CERT_REQUIRED,
-                "check_hostname": True,
-                "server_hostname": peer,
-            },
-            header=[f"Host: {host_header}"],
-            timeout=10,
-        )
-        ws.close()
-        return True
-    except Exception:
+        # Jalankan v2ray untuk test koneksi singkat
+        result = subprocess.run([V2RAY_BIN, "-test", "-config", tf_path],
+                                capture_output=True, text=True, timeout=15)
+        if result.returncode == 0:
+            return True
+    except subprocess.TimeoutExpired:
         return False
+    finally:
+        os.remove(tf_path)
+
+    return False
 
 def main():
-    if not os.path.exists(INPUT_FILE):
-        print(f"{INPUT_FILE} tidak ditemukan", flush=True)
-        return
+    accounts = fetch_accounts()
+    filtered = [a for a in accounts if has_complete_query(a)]
+    active = []
 
-    active_accounts = []
-    all_accounts = []
-
-    with open(INPUT_FILE, "r") as f:
-        source_links = [line.strip() for line in f if line.strip()]
-
-    for link in source_links:
-        print(f"Ambil akun dari {link} ...", flush=True)
-        all_accounts.extend(fetch_accounts_from_url(link))
-
-    print(f"Total {len(all_accounts)} akun ditemukan.", flush=True)
-
-    filtered = [acc for acc in all_accounts if has_complete_query(acc)]
-    print(f"{len(filtered)} akun dengan query lengkap ditemukan.", flush=True)
-
-    for i, acc in enumerate(filtered, start=1):
-        port, peer, path, host_header = parse_trojan_url(acc)
-        host = host_header
-        print(f"[{i}/{len(filtered)}] TLS check {host}:{port} SNI={peer} ...", end=" ", flush=True)
-        if check_tls(host, port, peer, host_header):
+    for i, acc in enumerate(filtered, 1):
+        print(f"[{i}/{len(filtered)}] Testing account...", flush=True)
+        if test_with_v2ray(acc):
             print("AKTIF ✅", flush=True)
-            active_accounts.append(acc)
+            active.append(acc)
         else:
             print("GAGAL ❌", flush=True)
 
     with open(OUTPUT_FILE, "w") as f:
-        for acc in active_accounts:
+        for acc in active:
             f.write(acc + "\n")
 
-    print(f"\nHasil akhir: {len(active_accounts)} akun aktif disimpan di {OUTPUT_FILE}", flush=True)
+    print(f"\nHasil akhir: {len(active)} akun aktif disimpan di {OUTPUT_FILE}", flush=True)
 
 if __name__ == "__main__":
     main()
