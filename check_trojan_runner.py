@@ -1,43 +1,57 @@
-import base64
-import requests
+#!/usr/bin/env python3
+import base64, re, requests, argparse, sys
 from urllib.parse import urlparse, parse_qs
-import re
 
-# URL raw GitHub yang berisi akun Trojan dalam format Base64
-GITHUB_URL = "https://raw.githubusercontent.com/Epodonios/v2ray-configs/refs/heads/main/Splitted-By-Protocol/trojan.txt"
-OUTPUT_FILE = "output.txt"
+def fetch_and_decode(url):
+    try:
+        text = requests.get(url, timeout=20).text.strip()
+        try:
+            # coba decode base64
+            return base64.b64decode(text).decode(errors="ignore")
+        except Exception:
+            return text
+    except Exception as e:
+        print(f"[ERROR] gagal fetch {url}: {e}", file=sys.stderr)
+        return ""
 
-# Regex untuk mendeteksi Trojan WS
-TROJAN_PATTERN = re.compile(r"trojan://[^@\s]+@[^:\s]+:\d+\?[^ \n]+")
-
-# Query wajib ada
-REQUIRED_QUERIES = {"host", "password", "sni", "peer", "ws"}
-
-def has_all_queries(url):
-    parsed = urlparse(url)
-    qs_keys = {k.lower() for k in parse_qs(parsed.query).keys()}
-    return REQUIRED_QUERIES.issubset(qs_keys)
+def parse_trojan(lines, require_sni_host=False):
+    good = []
+    for line in lines.splitlines():
+        line = line.strip()
+        if not line.startswith("trojan://"):
+            continue
+        try:
+            parts = urlparse(line)
+            qs = parse_qs(parts.query)
+            has_sni = 'sni' in qs and qs['sni'][0].strip()
+            has_host = 'host' in qs and qs['host'][0].strip()
+            if require_sni_host and not (has_sni and has_host):
+                continue
+            good.append(line)
+        except Exception:
+            continue
+    return good
 
 def main():
-    valid_count = 0
+    p = argparse.ArgumentParser()
+    p.add_argument("--input", required=True)
+    p.add_argument("--output", required=True)
+    p.add_argument("--require-sni-host", action="store_true")
+    args = p.parse_args()
 
-    with requests.get(GITHUB_URL, stream=True) as r:
-        r.raise_for_status()
-        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-            for line in r.iter_lines(decode_unicode=True):
-                if not line.strip():
-                    continue
-                try:
-                    decoded = base64.b64decode(line.strip()).decode("utf-8")
-                    matches = TROJAN_PATTERN.findall(decoded)
-                    for m in matches:
-                        if has_all_queries(m):
-                            f.write(m + "\n")
-                            valid_count += 1
-                except Exception:
-                    continue
+    all_good = []
+    with open(args.input) as f:
+        for url in f:
+            url = url.strip()
+            if not url: continue
+            raw = fetch_and_decode(url)
+            all_good.extend(parse_trojan(raw, require_sni_host=args.require_sni_host))
 
-    print(f"Jumlah akun Trojan WS: {valid_count}")
+    with open(args.output, "w") as out:
+        for line in all_good:
+            out.write(line + "\n")
+
+    print(f"Total akun valid: {len(all_good)}")
 
 if __name__ == "__main__":
     main()
