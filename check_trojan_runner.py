@@ -31,22 +31,19 @@ def extract_ip(url):
     match = re.search(r"@([\w\.-]+):(\d+)", url)
     return match.group(1) if match else None
 
-def run_speedtest_py(ip, tested_ips, timeout=10, delay=1):
-    if ip in tested_ips:
-        print(f"# IP {ip} sudah dites, skip speedtest")
-        return {"skip": True, "ip": ip}
-    tested_ips.add(ip)
+def run_speedtest_py(ip, timeout=10, delay=1):
     print(f"[INFO] Speedtest untuk IP {ip} ...")
     try:
         st = speedtest.Speedtest()
-        st.get_best_server(timeout=timeout)
-        ping = st.results.ping
-        isp = getattr(st.results, "client", {}).get("isp", "Unknown ISP")
+        servers = st.get_servers([])        # ambil semua server
+        best = st.get_best_server(servers) # pilih server terbaik
+        ping = best['latency']
+        isp = st.results.client.get('isp', 'Unknown ISP')
         print(f"# ISP: {isp} | Ping: {ping} ms")
         return {"isp": isp, "ping": ping, "ip": ip}
     except Exception as e:
         print(f"# Speedtest gagal: {e}")
-        return {"error": str(e)}
+        return {"error": str(e), "isp": "Unknown", "ping": "?", "ip": ip}
     finally:
         time.sleep(delay)
 
@@ -61,7 +58,6 @@ def main():
         accounts = fetch_and_decode(url)
         all_accounts.extend(accounts)
 
-    tested_ips = set()
     sorted_lines = []
     active_lines = []
 
@@ -78,19 +74,17 @@ def main():
             continue
 
         # run speedtest
-        result = run_speedtest_py(ip, tested_ips, timeout=args.timeout, delay=args.delay)
+        result = run_speedtest_py(ip, timeout=args.timeout, delay=args.delay)
 
         # simpan di sorted.txt
         sorted_lines.append(acc)
         if "error" in result:
             sorted_lines.append(f"# Speedtest gagal: {result['error']}")
-        elif result.get("skip", False):
-            sorted_lines.append(f"# IP {ip} sudah dites, skip speedtest")
         else:
             sorted_lines.append(f"# ISP: {result.get('isp','Unknown')} | Ping: {result.get('ping','?')} ms")
 
         # simpan di active.txt hanya jika speedtest sukses
-        if "error" not in result and not result.get("skip", False):
+        if "error" not in result:
             info = f"{acc}\n# ISP: {result.get('isp','Unknown')} | Ping: {result.get('ping','?')} ms"
             active_lines.append(info)
 
