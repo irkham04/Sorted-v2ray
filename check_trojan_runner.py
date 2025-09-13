@@ -43,10 +43,10 @@ def main():
     p.add_argument("--input", required=True, help="File input berisi URL raw GitHub")
     p.add_argument("--sorted", default="sorted.txt", help="File output akun tersortir")
     p.add_argument("--speedtest-bin", default="./speedtest", help="Path binary speedtest Ookla")
-    p.add_argument("--batch-size", type=int, default=5, help="Jumlah akun per batch speedtest")
-    p.add_argument("--delay", type=int, default=5, help="Delay antar akun speedtest (detik)")
+    p.add_argument("--delay", type=int, default=10, help="Delay antar akun speedtest (detik)")
     args = p.parse_args()
 
+    # ambil semua akun dari URL
     urls = []
     with open(args.input, "r") as f:
         urls = [line.strip() for line in f if line.strip()]
@@ -65,12 +65,11 @@ def main():
     print(f"[INFO] sorted.txt dibuat: {len(valid_accounts)} akun valid")
 
     # tulis active.txt
-    tested_ips = set()
+    tested_ips = {}  # IP -> hasil speedtest
     with open("active.txt", "w") as f:
         f.write("# Akun aktif dengan info speedtest (baris info diawali #)\n\n")
         for i, acc in enumerate(valid_accounts, start=1):
             f.write(acc + "\n")
-
             # ambil IP
             try:
                 ip = acc.split("@")[1].split(":")[0]
@@ -78,18 +77,19 @@ def main():
                 ip = None
 
             if ip and ip in tested_ips:
-                f.write(f"# IP {ip} sudah dites, skip speedtest\n\n")
+                f.write(tested_ips[ip] + "\n\n")
                 continue
 
+            # jalankan speedtest baru
             info = run_speedtest(args.speedtest_bin)
             f.write(info + "\n\n")
 
             if ip:
-                tested_ips.add(ip)
+                tested_ips[ip] = info
 
-            if i % args.batch_size == 0:
-                print(f"[INFO] Batch {i//args.batch_size} selesai, delay {args.delay}s")
-                time.sleep(args.delay)
+            # delay tiap akun
+            print(f"[INFO] Selesai akun {i}, delay {args.delay}s")
+            time.sleep(args.delay)
 
     print(f"[INFO] active.txt dibuat dengan speedtest tiap akun unik per IP")
 
