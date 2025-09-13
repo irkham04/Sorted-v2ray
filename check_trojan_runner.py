@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, re, time, requests, base64
+import argparse, re, time, requests, base64, sys
 import speedtest  # pip install speedtest-cli
 
 def parse_args():
@@ -10,6 +10,7 @@ def parse_args():
     parser.add_argument("--only-ws", action="store_true")
     parser.add_argument("--require-sni-host", action="store_true")
     parser.add_argument("--delay", type=int, default=1)
+    parser.add_argument("--timeout", type=int, default=10)
     return parser.parse_args()
 
 def fetch_and_decode(url):
@@ -23,10 +24,14 @@ def fetch_and_decode(url):
         except Exception:
             return [l.strip() for l in content.splitlines() if l.strip()]
     except Exception as e:
-        print(f"[ERROR] gagal fetch {url}: {e}")
+        print(f"[ERROR] gagal fetch {url}: {e}", file=sys.stderr)
         return []
 
-def run_speedtest_py(ip, tested_ips, delay=1):
+def extract_ip(url):
+    match = re.search(r"@([\w\.-]+):(\d+)", url)
+    return match.group(1) if match else None
+
+def run_speedtest_py(ip, tested_ips, timeout=10, delay=1):
     if ip in tested_ips:
         print(f"# IP {ip} sudah dites, skip speedtest")
         return {"skip": True, "ip": ip}
@@ -34,7 +39,7 @@ def run_speedtest_py(ip, tested_ips, delay=1):
     print(f"[INFO] Speedtest untuk IP {ip} ...")
     try:
         st = speedtest.Speedtest()
-        st.get_best_server()
+        st.get_best_server(timeout=timeout)
         ping = st.results.ping
         isp = getattr(st.results, "client", {}).get("isp", "Unknown ISP")
         print(f"# ISP: {isp} | Ping: {ping} ms")
@@ -44,10 +49,6 @@ def run_speedtest_py(ip, tested_ips, delay=1):
         return {"error": str(e)}
     finally:
         time.sleep(delay)
-
-def extract_ip(url):
-    match = re.search(r"@([\w\.-]+):(\d+)", url)
-    return match.group(1) if match else None
 
 def main():
     args = parse_args()
@@ -76,11 +77,22 @@ def main():
         if not ip:
             continue
 
-        result = run_speedtest_py(ip, tested_ips, delay=args.delay)
+        # run speedtest
+        result = run_speedtest_py(ip, tested_ips, timeout=args.timeout, delay=args.delay)
+
+        # simpan di sorted.txt
         sorted_lines.append(acc)
-        if "error" not in result and not result.get("skip", False):
-            active_lines.append(acc)
+        if "error" in result:
+            sorted_lines.append(f"# Speedtest gagal: {result['error']}")
+        elif result.get("skip", False):
+            sorted_lines.append(f"# IP {ip} sudah dites, skip speedtest")
+        else:
             sorted_lines.append(f"# ISP: {result.get('isp','Unknown')} | Ping: {result.get('ping','?')} ms")
+
+        # simpan di active.txt hanya jika speedtest sukses
+        if "error" not in result and not result.get("skip", False):
+            info = f"{acc}\n# ISP: {result.get('isp','Unknown')} | Ping: {result.get('ping','?')} ms"
+            active_lines.append(info)
 
     with open(args.sorted, "w") as f:
         f.write("\n".join(sorted_lines) + "\n")
