@@ -45,8 +45,15 @@ def has_complete_ws_query(url):
 
 def main():
     accounts = fetch_accounts()
+    print(f"Total akun diambil dari raw GitHub: {len(accounts)}")
+
     filtered = [a for a in accounts if has_complete_ws_query(a)]
     print(f"Total akun query lengkap & tipe WS: {len(filtered)}")
+
+    if filtered:
+        print("Daftar akun tersortir:")
+        for acc in filtered:
+            print(acc)
 
     with open(OUTPUT_SORTED, "w") as f:
         for acc in filtered:
