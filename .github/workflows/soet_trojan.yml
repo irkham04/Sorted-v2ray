@@ -6,7 +6,7 @@ on:
     branches: [ main ]
 
 jobs:
-  sort:
+  sort-and-test:
     runs-on: ubuntu-latest
 
     steps:
@@ -18,33 +18,27 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Python deps
-        run: python -m pip install requests
+      - name: Install requests
+        run: python -m pip install --upgrade pip && pip install requests
 
-      - name: Install Ookla Speedtest CLI
+      - name: Download Ookla Speedtest CLI
         run: |
-          if [ ! -x ./speedtest ]; then
-            echo "⚡ Installing Ookla Speedtest CLI..."
-            curl -L -o speedtest.tgz https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz
-            tar -xvzf speedtest.tgz
+          if [ ! -f ./speedtest ]; then
+            curl -sL https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz -o speedtest.tgz
+            tar xzf speedtest.tgz
             chmod +x speedtest
-          else
-            echo "✅ Speedtest CLI already installed, skipping..."
           fi
 
-      - name: Run trojan sorter + speedtest
+      - name: Run Trojan sorter & speedtest
         run: |
-          python check_trojan_runner.py --input input.txt --output sorted.txt --active active.txt --require-sni-host --only-ws
-          ./speedtest --accept-license --accept-gdpr -f json-pretty >> active.txt
+          python check_trojan_runner.py --input input.txt --sorted sorted.txt
 
       - name: Commit results
         uses: EndBug/add-and-commit@v9
         with:
           author_name: github-actions[bot]
           author_email: 41898282+github-actions[bot]@users.noreply.github.com
-          message: "update: sorted & active Trojan accounts"
-          add: |
-            sorted.txt
-            active.txt
+          message: "chore: update sorted.txt & active.txt (workflow)"
+          add: 'sorted.txt, active.txt'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
