@@ -21,7 +21,7 @@ jobs:
       - name: Run Trojan Check
         run: |
           mkdir -p results
-          python3 scripts/check_trojan_v2ray.py
+          python3 check_trojan_v2ray.py
 
       - name: Commit results
         run: |
