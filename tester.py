@@ -1,75 +1,98 @@
-import requests
-import base64
 import os
+import ssl
+import base64
+import requests
+import websocket
+from urllib.parse import urlparse, parse_qs
 
-ACCOUNTS_FILE = "accounts.txt"
-ACTIVE_FILE = "active.txt"
-DEAD_FILE = "dead.txt"
+INPUT_FILE = "input.txt"
+OUTPUT_DIR = "results"
+OUTPUT_FILE = os.path.join(OUTPUT_DIR, "active_accounts.txt")
 
-def download_accounts():
-    urls = []
-    with open(ACCOUNTS_FILE, "r") as f:
-        for line in f:
-            url = line.strip()
-            if url:
-                urls.append(url)
-    accounts = []
-    for url in urls:
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+BUG_HOST = "quiz.vidio.com"
+
+def parse_trojan_url(trojan_url: str):
+    parsed = urlparse(trojan_url)
+    port = parsed.port or 443
+    qs = parse_qs(parsed.query)
+    # peer diambil dari sni dulu, jika tidak ada dari host query
+    peer = qs.get("sni", qs.get("host", [parsed.hostname]))[0]
+    return port, peer
+
+def check_ws_tls(host, port, peer):
+    ws_url = f"wss://{host}:{port}/"
+    try:
+        ws = websocket.create_connection(
+            ws_url,
+            sslopt={
+                "cert_reqs": ssl.CERT_REQUIRED,
+                "check_hostname": True,
+                "server_hostname": peer
+            },
+            timeout=5
+        )
+        ws.send("ping")
+        ws.close()
+        return True, "OK"
+    except Exception as e:
+        return False, str(e)
+
+def fetch_accounts_from_url(url):
+    """Ambil akun dari raw GitHub, decode Base64 jika perlu"""
+    try:
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        text = resp.text.strip()
+
+        # coba decode Base64, jika gagal anggap teks biasa
         try:
-            r = requests.get(url, timeout=10)
-            r.raise_for_status()
-            for line in r.text.splitlines():
-                line = line.strip()
-                if line:
-                    accounts.append(line)
-        except Exception as e:
-            print(f"Failed to download {url}: {e}")
-    return accounts
+            decoded = base64.b64decode(text).decode('utf-8')
+        except Exception:
+            decoded = text
 
-def decode_account(acc_b64):
-    try:
-        decoded = base64.b64decode(acc_b64).decode()
-        return decoded
-    except Exception:
-        return None
-
-def test_ws_tls(account_str):
-    """
-    Dummy test: cek format WS+TLS dan password field ada.
-    Real TLS handshake ga bisa di GitHub Actions tanpa server.
-    """
-    try:
-        required_fields = ["server", "port", "type", "uuid", "tls", "servername", "network", "ws-opts"]
-        for field in required_fields:
-            if field not in account_str:
-                return False
-        return True
-    except Exception:
-        return False
+        lines = [line.strip() for line in decoded.splitlines() if line.strip()]
+        return [line for line in lines if line.startswith("trojan://")]
+    except Exception as e:
+        print(f"Gagal fetch {url}: {e}")
+        return []
 
 def main():
-    accounts = download_accounts()
-    active = []
-    dead = []
+    active_accounts = []
+    if not os.path.exists(INPUT_FILE):
+        print(f"{INPUT_FILE} tidak ditemukan")
+        return
 
-    for acc in accounts:
-        decoded = decode_account(acc)
-        if not decoded:
-            dead.append(acc)
+    with open(INPUT_FILE, "r") as f:
+        source_links = [line.strip() for line in f if line.strip()]
+
+    all_accounts = []
+    for link in source_links:
+        print(f"Ambil daftar dari {link} ...")
+        all_accounts.extend(fetch_accounts_from_url(link))
+
+    print(f"Total {len(all_accounts)} akun ditemukan.")
+
+    for acc in all_accounts:
+        parsed = parse_trojan_url(acc)
+        if not parsed:
             continue
-        if test_ws_tls(decoded):
-            active.append(acc)
+        port, peer = parsed
+        host = BUG_HOST  # ganti host ke quiz.vidio.com
+        print(f"Tes {host}:{port} (peer: {peer}) ...", end=" ")
+        ok, msg = check_ws_tls(host, port, peer)
+        if ok:
+            print("OK ✅")
+            active_accounts.append(acc)  # simpan baris asli
         else:
-            dead.append(acc)
+            print(f"FAILED ❌ ({msg})")
 
-    with open(ACTIVE_FILE, "w") as f:
-        for a in active:
-            f.write(a + "\n")
-    with open(DEAD_FILE, "w") as f:
-        for d in dead:
-            f.write(d + "\n")
+    with open(OUTPUT_FILE, "w") as f:
+        for acc in active_accounts:
+            f.write(acc + "\n")
 
-    print(f"Done! {len(active)} active, {len(dead)} dead.")
+    print(f"\nHasil: {len(active_accounts)} akun aktif disimpan di {OUTPUT_FILE}")
 
 if __name__ == "__main__":
     main()
