@@ -29,7 +29,8 @@ jobs:
             --active active.txt \
             --only-ws \
             --require-sni-host \
-            --delay 1 || true
+            --delay 1 \
+            --timeout 10 || true
 
       - name: Commit results
         run: |
