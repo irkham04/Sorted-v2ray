@@ -37,10 +37,17 @@ def run_speedtest_py(ip, timeout=10, delay=1):
         st = speedtest.Speedtest()
         servers = st.get_servers([])
         best = st.get_best_server(servers)
-        ping = best['latency']
+
+        # perbaikan: jika best float, langsung pakai sebagai ping
+        if isinstance(best, dict):
+            ping = best.get('latency', '?')
+        else:
+            ping = best
+
         isp = st.results.client.get('isp', 'Unknown ISP')
         print(f"# ISP: {isp} | Ping: {ping} ms")
         return {"isp": isp, "ping": ping, "ip": ip}
+
     except Exception as e:
         print(f"# Speedtest gagal: {e}")
         return {"error": str(e), "isp": "Unknown", "ping": "?", "ip": ip}
