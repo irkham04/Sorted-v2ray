@@ -1,33 +1,73 @@
-name: Sort Trojan Accounts
+name: Sort and Check Trojan Accounts (debug)
 
 on:
   workflow_dispatch:
 
 jobs:
-  sort:
+  sort_check:
     runs-on: ubuntu-latest
+    env:
+      PYTHONUNBUFFERED: "1"   # supaya print() tampil realtime
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.11"
+      - name: Show runner info (debug)
+        run: |
+          echo "### Runner username and OS"
+          whoami
+          uname -a
+          echo "### Python info"
+          python --version || true
+          ls -la
 
-      - name: Install dependencies
+      - name: Show repo files & input (debug)
+        run: |
+          echo "=== ls -R ==="
+          ls -R
+          echo "=== show input.txt (first 200 lines) ==="
+          if [ -f input.txt ]; then
+            head -n 200 input.txt || true
+          else
+            echo "input.txt not found"
+          fi
+
+      - name: Install dependencies (verbose)
         run: |
           python -m pip install --upgrade pip
-          pip install websocket-client requests
+          pip --version
+          pip install --disable-pip-version-check -v requests websocket-client || true
+        # note: we allow the step to show full logs; if fails it will appear in logs
 
-      - name: Run sorting script
+      - name: Verify python script exists
         run: |
-          python check_trojan_sort.py
+          if [ ! -f check_trojan_sort.py ]; then
+            echo "ERROR: check_trojan_sort.py tidak ditemukan!"
+            ls -la
+            exit 1
+          fi
+          echo "Script exists."
 
-      - name: Commit results
+      - name: Run sorting and TLS check (with timeout 20m)
+        # use timeout to avoid infinite hang; -u unbuffered; exit code will propagate
+        run: |
+          echo "Starting python script..."
+          timeout 20m python -u check_trojan_sort.py
+        # if your script legitimately needs >20m, increase timeout
+
+      - name: Show results dir (debug)
+        run: |
+          echo "=== results folder ==="
+          ls -la results || echo "results not present"
+
+      - name: Commit results (if any)
         run: |
           git config --local user.name "github-actions"
           git config --local user.email "actions@github.com"
-          git add results/sorted_accounts.txt
-          git commit -m "Update sorted accounts"
-          git push
+          if git status --porcelain | grep -q results; then
+            git add results/sorted_accounts.txt || true
+            git commit -m "Update sorted accounts" || echo "Nothing to commit"
+            git push || echo "Push failed"
+          else
+            echo "No results changed, skipping commit."
+          fi
