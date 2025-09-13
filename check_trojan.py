@@ -11,18 +11,18 @@ OUTPUT_FILE = os.path.join(OUTPUT_DIR, "active_accounts.txt")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-BUG_HOST = "quiz.vidio.com"
-
 def parse_trojan_url(trojan_url: str):
     parsed = urlparse(trojan_url)
-    port = parsed.port or 443
     qs = parse_qs(parsed.query)
-    # peer diambil dari sni dulu, jika tidak ada dari host query
-    peer = qs.get("sni", qs.get("host", [parsed.hostname]))[0]
-    return port, peer
 
-def check_ws_tls(host, port, peer):
-    ws_url = f"wss://{host}:{port}/"
+    host_header = qs.get("host", [parsed.hostname])[0]        # Host header
+    peer = qs.get("sni", [host_header])[0]                    # SNI fallback ke host header
+    path = qs.get("path", [parsed.path or "/"])[0]            # Path WS
+    port = parsed.port or 443
+    return port, peer, path, host_header
+
+def check_ws_tls(host, port, path, peer, host_header):
+    ws_url = f"wss://{host}:{port}{path}"
     try:
         ws = websocket.create_connection(
             ws_url,
@@ -31,7 +31,8 @@ def check_ws_tls(host, port, peer):
                 "check_hostname": True,
                 "server_hostname": peer
             },
-            timeout=5
+            header=[f"Host: {host_header}"],
+            timeout=10
         )
         ws.send("ping")
         ws.close()
@@ -40,13 +41,12 @@ def check_ws_tls(host, port, peer):
         return False, str(e)
 
 def fetch_accounts_from_url(url):
-    """Ambil akun dari raw GitHub, decode Base64 jika perlu"""
     try:
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
         text = resp.text.strip()
 
-        # coba decode Base64, jika gagal anggap teks biasa
+        # Coba decode Base64, kalau gagal pakai teks biasa
         try:
             decoded = base64.b64decode(text).decode('utf-8')
         except Exception:
@@ -59,35 +59,39 @@ def fetch_accounts_from_url(url):
         return []
 
 def main():
-    active_accounts = []
     if not os.path.exists(INPUT_FILE):
         print(f"{INPUT_FILE} tidak ditemukan")
         return
 
+    active_accounts = []
     with open(INPUT_FILE, "r") as f:
         source_links = [line.strip() for line in f if line.strip()]
 
     all_accounts = []
     for link in source_links:
-        print(f"Ambil daftar dari {link} ...")
+        print(f"Ambil akun dari {link} ...")
         all_accounts.extend(fetch_accounts_from_url(link))
 
     print(f"Total {len(all_accounts)} akun ditemukan.")
 
     for acc in all_accounts:
-        parsed = parse_trojan_url(acc)
-        if not parsed:
+        try:
+            port, peer, path, host_header = parse_trojan_url(acc)
+        except Exception as e:
+            print(f"Parsing gagal untuk akun: {acc} ({e})")
             continue
-        port, peer = parsed
-        host = BUG_HOST  # ganti host ke quiz.vidio.com
-        print(f"Tes {host}:{port} (peer: {peer}) ...", end=" ")
-        ok, msg = check_ws_tls(host, port, peer)
-        if ok:
-            print("OK ✅")
-            active_accounts.append(acc)  # simpan baris asli
-        else:
-            print(f"FAILED ❌ ({msg})")
 
+        host = host_header  # gunakan host asli untuk koneksi
+        print(f"Tes {host}:{port} path={path} SNI={peer} ...", end=" ")
+        ok, msg = check_ws_tls(host, port, path, peer, host_header)
+        if ok:
+            print("AKTIF ✅")
+            active_accounts.append(acc)  # simpan baris lengkap
+        else:
+            print(f"GAGAL ❌ ({msg})")
+
+    # tulis akun aktif lengkap
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     with open(OUTPUT_FILE, "w") as f:
         for acc in active_accounts:
             f.write(acc + "\n")
