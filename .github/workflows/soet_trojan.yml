@@ -31,7 +31,7 @@ jobs:
 
       - name: Run Trojan sorter & speedtest
         run: |
-          python check_trojan_runner.py --input input.txt --sorted sorted.txt --batch-size 5 --delay 5 || true
+          python check_trojan_runner.py --input input.txt --sorted sorted.txt --delay 10 || true
 
       - name: Debug file contents
         run: |
@@ -40,7 +40,7 @@ jobs:
           echo "=== active.txt ==="
           cat active.txt
 
-      - name: Commit results (force push even if empty)
+      - name: Commit results (force push)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
