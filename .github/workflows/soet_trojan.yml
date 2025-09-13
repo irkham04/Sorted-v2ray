@@ -18,13 +18,25 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install deps
+      - name: Install Python deps
         run: |
           python -m pip install --upgrade pip requests
 
       - name: Install Ookla Speedtest CLI
         run: |
-          curl -s https://install.speedtest.net/app/cli/install.sh | bash
+          set -e
+          URL="https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz"
+          echo "Downloading Speedtest CLI..."
+          if curl -L --fail "$URL" -o speedtest.tgz; then
+            tar -xvzf speedtest.tgz
+            sudo mv speedtest /usr/local/bin/
+            echo "Installed speedtest from tarball"
+          else
+            echo "Tarball failed, installing via apt..."
+            sudo apt-get update
+            sudo apt-get install -y speedtest
+          fi
+          speedtest --version
 
       - name: Install Xray-core
         run: |
@@ -34,10 +46,16 @@ jobs:
           unzip xray.zip -d xray
           sudo mv xray/xray /usr/local/bin/xray
           sudo chmod +x /usr/local/bin/xray
+          xray --version
 
-      - name: Run checker
+      - name: Run checker (sort + speedtest)
         run: |
-          python check_trojan_runner.py --input input.txt --output sorted.txt --only-ws --require-sni-host --check-active
+          python check_trojan_runner.py \
+            --input input.txt \
+            --output sorted.txt \
+            --only-ws \
+            --require-sni-host \
+            --check-active
 
       - name: Commit results
         uses: EndBug/add-and-commit@v9
