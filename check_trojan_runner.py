@@ -1,107 +1,109 @@
 #!/usr/bin/env python3
-import argparse, base64, re, requests, sys, time
-import ssl
-import socket
-from urllib.parse import urlparse, parse_qs
+import argparse, base64, requests, sys, time
+from urllib.parse import urlparse, parse_qs, urlunparse
+
 try:
     import websocket
 except ImportError:
-    print("websocket-client belum terinstall. Jalankan: pip install websocket-client")
+    print("Install websocket-client package!", file=sys.stderr)
     sys.exit(1)
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True)
-    parser.add_argument("--sorted", required=True)
-    parser.add_argument("--active", required=True)
-    parser.add_argument("--require-sni-host", action="store_true")
-    parser.add_argument("--delay", type=float, default=1)
-    parser.add_argument("--timeout", type=float, default=5)
-    return parser.parse_args()
 
-def fetch_and_decode(url):
+def fetch_and_decode(url, timeout=20):
     try:
-        r = requests.get(url.strip(), timeout=10)
-        r.raise_for_status()
-        content = r.text.strip()
+        text = requests.get(url, timeout=timeout).text.strip()
         try:
-            decoded = base64.b64decode(content).decode(errors="ignore")
-            return [l.strip() for l in decoded.splitlines() if l.strip()]
+            return base64.b64decode(text).decode(errors="ignore")
         except Exception:
-            return [l.strip() for l in content.splitlines() if l.strip()]
+            return text
     except Exception as e:
         print(f"[ERROR] gagal fetch {url}: {e}", file=sys.stderr)
-        return []
+        return ""
+
 
 def parse_trojan_ws(line, require_sni_host=False):
     if not line.lower().startswith("trojan://"):
         return None
     parsed = urlparse(line)
     qs = parse_qs(parsed.query)
-    type_ws = qs.get("type", [""])[0].lower() == "ws"
+    if qs.get("type", [""])[0].lower() != "ws":
+        return None
     has_sni = "sni" in qs and qs["sni"][0].strip()
     has_host = "host" in qs and qs["host"][0].strip()
     if require_sni_host and not (has_sni and has_host):
         return None
-    if type_ws:
-        return {
-            "line": line,
-            "host": qs.get("host", [""])[0],
-            "port": parsed.port,
-            "path": qs.get("path", ["/"])[0],
-            "sni": qs.get("sni", [""])[0]
-        }
-    return None
+    return {
+        "original": line,
+        "scheme": parsed.scheme,
+        "user": parsed.username,
+        "host": parsed.hostname,
+        "port": parsed.port,
+        "path": qs.get("path", ["/"])[0],
+        "sni": qs.get("sni", [""])[0],
+        "host_query": qs.get("host", [""])[0],
+        "query": parsed.query,
+        "fragment": parsed.fragment
+    }
 
-def check_ws(account, timeout=5):
-    url = f"wss://{account['host']}:{account['port']}{account['path']}"
+
+def ws_check(account, delay=1, timeout=5):
+    # Ubah domain sebelum port menjadi quiz.vidio.com
+    ws_url = f"ws://quiz.vidio.com:{account['port']}{account['path']}"
     try:
-        start = time.time()
-        ws = websocket.create_connection(
-            url,
-            timeout=timeout,
-            sslopt={"server_hostname": account["sni"], "cert_reqs": ssl.CERT_NONE}
-        )
+        ws = websocket.create_connection(ws_url, timeout=timeout, sslopt={"server_hostname": account["sni"]})
         ws.close()
-        latency = int((time.time() - start)*1000)
-        return True, latency
+        time.sleep(delay)
+        return True, 0
     except Exception as e:
+        time.sleep(delay)
         return False, str(e)
 
+
 def main():
-    args = parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input", required=True)
+    parser.add_argument("--sorted", default="sorted.txt")
+    parser.add_argument("--active", default="active.txt")
+    parser.add_argument("--require-sni-host", action="store_true")
+    parser.add_argument("--delay", type=float, default=1)
+    parser.add_argument("--timeout", type=int, default=5)
+    args = parser.parse_args()
+
     all_accounts = []
 
+    # Fetch raw accounts
     with open(args.input) as f:
-        urls = [l.strip() for l in f if l.strip()]
-    for url in urls:
-        all_accounts.extend(fetch_and_decode(url))
-
-    ws_accounts = []
-    for line in all_accounts:
-        acc = parse_trojan_ws(line, args.require_sni_host)
-        if acc:
-            ws_accounts.append(acc)
+        for url in f:
+            url = url.strip()
+            if not url:
+                continue
+            raw = fetch_and_decode(url)
+            for line in raw.splitlines():
+                acc = parse_trojan_ws(line, require_sni_host=args.require_sni_host)
+                if acc:
+                    all_accounts.append(acc)
 
     sorted_lines = []
     active_lines = []
 
-    for idx, acc in enumerate(ws_accounts):
-        print(f"[INFO] Memproses akun {idx+1}/{len(ws_accounts)}")
-        sorted_lines.append(acc["line"])
-        active, info = check_ws(acc, timeout=args.timeout)
-        if active:
-            sorted_lines.append(f"# Status: Aktif | Ping: {info} ms")
-            active_lines.append(f"{acc['line']}\n# Status: Aktif | Ping: {info} ms")
+    for idx, acc in enumerate(all_accounts, start=1):
+        print(f"[INFO] Memproses akun {idx}/{len(all_accounts)}")
+        ok, info = ws_check(acc, delay=args.delay, timeout=args.timeout)
+        # Buat URL dengan domain quiz.vidio.com sebelum port
+        url = f"{acc['scheme']}://{acc['user']}@quiz.vidio.com:{acc['port']}?{acc['query']}#{acc['fragment']}"
+        if ok:
+            sorted_lines.append(f"{url}\n# Status: Aktif | Ping: {info} ms\n")
+            active_lines.append(f"{url}\n# Status: Aktif | Ping: {info} ms\n")
         else:
-            sorted_lines.append(f"# Status: Tidak aktif | Info: {info}")
-
-        time.sleep(args.delay)
+            sorted_lines.append(f"{url}\n# Status: Tidak aktif | Info: {info}\n")
 
     with open(args.sorted, "w") as f:
-        f.write("\n".join(sorted_lines)+"\n")
+        f.writelines(sorted_lines)
     with open(args.active, "w") as f:
-        f.write("\n".join(active_lines)+"\n")
+        f.writelines(active_lines)
+
+    print(f"[INFO] Total akun WS: {len(all_accounts)}, Aktif: {len(active_lines)}")
+
 
 if __name__ == "__main__":
     main()
