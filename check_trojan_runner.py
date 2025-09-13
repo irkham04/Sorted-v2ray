@@ -28,7 +28,7 @@ def main():
         for account in decoded_accounts:
             f.write(account + "\n")
 
-    print(f"Selesai! {len(decoded_accounts)} baris berhasil didecode dan disimpan di {OUTPUT_FILE}")
+    print(f"Selesai! {len(decoded_accounts)} akun Trojan berhasil didecode dan disimpan di {OUTPUT_FILE}")
 
 if __name__ == "__main__":
     main()
