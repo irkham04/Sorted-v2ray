@@ -1,107 +1,91 @@
 #!/usr/bin/env python3
-import argparse, base64, requests, time, socket, sys
-from urllib.parse import urlparse
-import speedtest
+import argparse
+import subprocess
+import json
+import time
+import re
 
-def decode_base64_url(url):
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input", required=True, help="File input")
+    parser.add_argument("--sorted", required=True, help="File output sorted")
+    parser.add_argument("--active", required=True, help="File output active")
+    parser.add_argument("--only-ws", action="store_true", help="Hanya ws")
+    parser.add_argument("--require-sni-host", action="store_true", help="Wajib ada SNI & host")
+    parser.add_argument("--speedtest-bin", default="./speedtest-bin", help="Lokasi speedtest CLI")
+    parser.add_argument("--delay", type=int, default=1, help="Delay antar speedtest (detik)")
+    return parser.parse_args()
+
+def run_speedtest(ip, speedtest_bin, tested_ips, delay=1):
+    if ip in tested_ips:
+        print(f"# IP {ip} sudah dites, skip speedtest", flush=True)
+        return {"skip": True, "ip": ip}
+    tested_ips.add(ip)
+    print(f"[INFO] Jalankan speedtest untuk IP {ip} ...", flush=True)
+
     try:
-        r = requests.get(url, timeout=15)
-        r.raise_for_status()
-        decoded = base64.b64decode(r.text).decode("utf-8", errors="ignore")
-        return decoded.splitlines()
+        result = subprocess.run(
+            [speedtest_bin, "-f", "json"],
+            capture_output=True, text=True, timeout=60
+        )
+        if result.returncode != 0:
+            print(f"# Speedtest gagal: {result.stderr.strip()}", flush=True)
+            return {"error": f"Speedtest gagal code {result.returncode}"}
+
+        data = json.loads(result.stdout)
+        server_data = data.get("server", {})
+        isp = data.get("isp", "Unknown ISP")
+        server_host = server_data.get("host", "Unknown Host")
+        server_name = server_data.get("name", "Unknown Name")
+        server_country = server_data.get("country", "Unknown Country")
+        ping = data.get("ping", {}).get("latency", "?")
+        print(f"# ISP: {isp} | Server: {server_name} ({server_host}, {server_country}) | Ping: {ping} ms", flush=True)
+        return {"isp": isp, "server": server_name, "host": server_host, "country": server_country, "ping": ping, "ip": ip}
     except Exception as e:
-        print(f"[ERROR] Gagal fetch/decode {url}: {e}")
-        return []
+        print(f"# Speedtest exception: {e}", flush=True)
+        return {"error": str(e)}
+    finally:
+        time.sleep(delay)
 
-def is_valid_trojan(line):
-    if not line.startswith("trojan://"):
-        return False
-    if "type=ws" not in line.lower():
-        return False
-    if "sni=" not in line or "host=" not in line:
-        return False
-    return True
-
-def run_speedtest():
-    try:
-        st = speedtest.Speedtest()
-        st.get_best_server()
-        st.download()
-        st.upload()
-        server = st.results.server
-        ping = st.results.ping
-        isp = st.results.client["isp"]
-        server_name = server["name"]
-        server_loc = f"{server['location']}, {server['country']}"
-        return f"# ISP: {isp} | Server: {server_name} ({server_loc}) | Ping: {ping} ms"
-    except Exception as e:
-        return f"# Speedtest gagal: {e}"
-
-def test_browsing(host, port=443, timeout=5):
-    try:
-        sock = socket.create_connection((host, port), timeout=timeout)
-        sock.close()
-        return "# Browsing: OK"
-    except Exception:
-        return "# Browsing: FAIL"
+def extract_ip(url):
+    match = re.search(r"@([\w\.-]+):(\d+)", url)
+    return match.group(1) if match else None
 
 def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--input", required=True)
-    p.add_argument("--sorted", default="sorted.txt")
-    p.add_argument("--delay", type=int, default=3)
-    args = p.parse_args()
+    args = parse_args()
+    with open(args.input, "r") as f:
+        lines = [l.strip() for l in f if l.strip()]
 
-    urls = []
-    with open(args.input) as f:
-        urls = [line.strip() for line in f if line.strip()]
+    accounts = [l for l in lines if not l.startswith("#")]
+    tested_ips = set()
 
-    all_accounts = []
-    for url in urls:
-        all_accounts.extend(decode_base64_url(url))
+    sorted_lines = []
+    active_lines = []
 
-    valid_accounts = [acc for acc in all_accounts if is_valid_trojan(acc)]
+    for idx, acc in enumerate(accounts):
+        print(f"[INFO] Memproses akun {idx+1}/{len(accounts)}", flush=True)
 
-    # tulis sorted.txt
+        if args.only_ws and "type=ws" not in acc.lower():
+            continue
+        if args.require_sni_host and ("sni=" not in acc.lower() or "host=" not in acc.lower()):
+            continue
+
+        ip = extract_ip(acc)
+        if not ip:
+            continue
+
+        result = run_speedtest(ip, args.speedtest_bin, tested_ips, delay=args.delay)
+
+        sorted_lines.append(acc)
+        if "error" not in result and not result.get("skip", False):
+            active_lines.append(acc)
+            sorted_lines.append(f"# ISP: {result.get('isp','Unknown')} | Server: {result.get('server','Unknown')} ({result.get('host','Unknown')}, {result.get('country','Unknown')}) | Ping: {result.get('ping','?')} ms")
+
     with open(args.sorted, "w") as f:
-        f.write(f"# Total akun valid: {len(valid_accounts)}\n")
-        for acc in valid_accounts:
-            f.write(acc + "\n")
-    print(f"[INFO] sorted.txt dibuat: {len(valid_accounts)} akun valid")
+        f.write("\n".join(sorted_lines) + "\n")
 
-    # tulis active.txt
-    tested_ips = {}
-    with open("active.txt", "w") as f:
-        f.write("# Akun aktif dengan info speedtest dan browsing (baris info diawali #)\n\n")
-        for i, acc in enumerate(valid_accounts, start=1):
-            f.write(acc + "\n")
-            try:
-                ip = acc.split("@")[1].split(":")[0]
-            except:
-                ip = None
-
-            if ip in tested_ips:
-                f.write(tested_ips[ip] + "\n\n")
-                continue
-
-            info = run_speedtest()
-
-            # test browsing host dari query sni atau host
-            parsed = urlparse(acc)
-            qs = dict([p.split("=") for p in parsed.query.split("&") if "=" in p])
-            host = qs.get("sni") or qs.get("host") or ip
-            browse_info = test_browsing(host)
-
-            full_info = info + "\n" + browse_info
-            f.write(full_info + "\n\n")
-
-            if ip:
-                tested_ips[ip] = full_info
-
-            print(f"[INFO] Selesai akun {i}, delay {args.delay}s")
-            time.sleep(args.delay)
-
-    print("[INFO] active.txt selesai dibuat")
+    with open(args.active, "w") as f:
+        f.write("\n".join(active_lines) + "\n")
 
 if __name__ == "__main__":
     main()
