@@ -1,104 +1,102 @@
 import base64
+import re
 import requests
 import argparse
 import subprocess
-import json
 
-def decode_base64_url(url):
-    """Ambil raw base64 dari URL & decode jadi string akun Trojan"""
-    try:
-        raw = requests.get(url.strip()).text.strip().splitlines()
-        decoded = []
-        for line in raw:
+def decode_base64_lines(file_path):
+    """Decode base64 lines from file and return as list of strings."""
+    decoded = []
+    with open(file_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
             try:
-                decoded_line = base64.b64decode(line).decode("utf-8").strip()
-                decoded.append(decoded_line)
+                decoded_line = base64.b64decode(line).decode("utf-8", errors="ignore")
+                decoded.extend(decoded_line.splitlines())
             except Exception:
                 continue
-        return decoded
-    except Exception as e:
-        print(f"Error fetching {url}: {e}")
-        return []
+    return decoded
+
+def parse_trojan_accounts(lines):
+    """Ambil hanya akun trojan:// dari lines"""
+    return [l.strip() for l in lines if l.strip().startswith("trojan://")]
 
 def filter_trojan_ws(accounts):
-    """Sortir hanya akun trojan WS dengan SNI & host"""
+    """Sortir hanya akun Trojan WS (buang TCP dan yang tidak lengkap)."""
     result = []
     for acc in accounts:
-        if acc.startswith("trojan://") and "type=ws" in acc and "sni=" in acc and "host=" in acc:
-            result.append(acc)
+        if not acc.startswith("trojan://"):
+            continue
+        if "type=ws" not in acc:
+            continue
+        if "sni=" not in acc or "host=" not in acc:
+            continue
+        result.append(acc)
     return result
 
-def test_account_with_xray(account):
-    """TODO: Tes koneksi pakai Xray. Sekarang dummy return True"""
-    return True
+def check_account_active(url):
+    """Cek akun trojan aktif dengan request HTTP dummy (head)."""
+    try:
+        if "@" in url:
+            server = url.split("@")[1].split("#")[0]
+            if ":" in server:
+                server = server.split(":")[0]
+            test_url = f"https://{server}"
+            r = requests.head(test_url, timeout=5, verify=False)
+            return r.status_code < 500
+    except Exception:
+        return False
+    return False
 
 def run_speedtest():
-    """Jalankan Ookla Speedtest CLI format JSON"""
+    """Jalankan speedtest Ookla CLI dan ambil hasil (server, ping, download, upload)."""
     try:
-        result = subprocess.check_output(
-            ["speedtest", "--accept-license", "--accept-gdpr", "-f", "json"],
-            text=True
+        result = subprocess.run(
+            ["./speedtest", "--format=json"],
+            capture_output=True,
+            text=True,
+            timeout=60
         )
-        return result
-    except Exception as e:
-        print(f"Speedtest error: {e}")
-        return None
-
-def parse_speedtest(json_data):
-    """Ambil info server dari hasil speedtest JSON"""
-    try:
-        data = json.loads(json_data)
-        server = data.get("server", {})
-        return f'Server: ID={server.get("id")} | Name="{server.get("name")}" | Location="{server.get("location")}" | Sponsor="{server.get("sponsor")}"'
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
     except Exception:
-        return "Server: Unknown"
+        return None
+    return None
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True)
-    parser.add_argument("--output", required=True)
-    parser.add_argument("--only-ws", action="store_true")
-    parser.add_argument("--require-sni-host", action="store_true")
-    parser.add_argument("--check-active", action="store_true")
+    parser.add_argument("--input", required=True, help="File input base64")
+    parser.add_argument("--sorted", default="sorted.txt", help="File output sorted WS accounts")
+    parser.add_argument("--active", default="active.txt", help="File output active WS accounts")
     args = parser.parse_args()
 
-    urls = open(args.input).read().splitlines()
-    all_accounts, sorted_accounts, active_accounts = [], [], []
+    # decode file base64
+    lines = decode_base64_lines(args.input)
+    trojan_accounts = parse_trojan_accounts(lines)
 
-    for url in urls:
-        decoded = decode_base64_url(url)
-        all_accounts.extend(decoded)
+    # filter WS only
+    sorted_accounts = filter_trojan_ws(trojan_accounts)
 
-    # filter trojan
-    for acc in all_accounts:
-        if acc.startswith("trojan://"):
-            if args.only_ws and "type=ws" not in acc:
-                continue
-            if args.require_sni_host and not ("sni=" in acc and "host=" in acc):
-                continue
-            sorted_accounts.append(acc)
-
-    # simpan hasil sortir
-    with open(args.output, "w") as f:
-        f.write(f"# Akun aktif: 0 dari total: {len(all_accounts)}\n")
+    with open(args.sorted, "w", encoding="utf-8") as f:
         f.write("\n".join(sorted_accounts))
 
     # cek aktif + speedtest
-    if args.check_active:
-        with open("active.txt", "w") as f:
-            for acc in sorted_accounts:
-                if test_account_with_xray(acc):
-                    spd = run_speedtest()
-                    server_info = parse_speedtest(spd) if spd else "Server: Unknown"
-                    f.write(acc + "\n" + server_info + "\n\n")
-                    active_accounts.append(acc)
+    active_accounts = []
+    for acc in sorted_accounts:
+        if check_account_active(acc):
+            speedtest_result = run_speedtest()
+            if speedtest_result:
+                active_accounts.append(f"{acc}\n# Speedtest: {speedtest_result}\n")
+            else:
+                active_accounts.append(acc)
 
-        # update header sorted.txt
-        with open(args.output, "r+") as f:
-            lines = f.readlines()
-            lines[0] = f"# Akun aktif: {len(active_accounts)} dari total: {len(all_accounts)}\n"
-            f.seek(0)
-            f.writelines(lines)
+    with open(args.active, "w", encoding="utf-8") as f:
+        f.write("\n".join(active_accounts))
+
+    print(f"Total akun valid (Trojan WS only): {len(sorted_accounts)}")
+    print(f"Akun aktif: {len(active_accounts)} dari total {len(sorted_accounts)}")
 
 if __name__ == "__main__":
     main()
