@@ -33,12 +33,19 @@ jobs:
         run: |
           python check_trojan_runner.py --input input.txt --sorted sorted.txt --batch-size 5 --delay 5 || true
 
-      - name: Commit results
-        uses: EndBug/add-and-commit@v9
-        with:
-          author_name: github-actions[bot]
-          author_email: 41898282+github-actions[bot]@users.noreply.github.com
-          message: "chore: update sorted.txt & active.txt (workflow)"
-          add: 'sorted.txt, active.txt'
+      - name: Debug file contents
+        run: |
+          echo "=== sorted.txt ==="
+          cat sorted.txt
+          echo "=== active.txt ==="
+          cat active.txt
+
+      - name: Commit results (force push even if empty)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add sorted.txt active.txt
+          git commit -m "chore: update sorted.txt & active.txt (workflow)" --allow-empty
+          git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
