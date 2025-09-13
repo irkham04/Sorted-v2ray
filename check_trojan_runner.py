@@ -1,65 +1,59 @@
-import os
 import base64
+import re
 import requests
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse, parse_qs
 
-INPUT_FILE = "input.txt"
-OUTPUT_SORTED = "results/sorted.txt"
+# URL raw GitHub berisi akun Trojan Base64
+github_raw_url = "https://raw.githubusercontent.com/user/repo/branch/input.txt"
 
-os.makedirs("results", exist_ok=True)
+# Regex untuk mendeteksi Trojan WS
+trojan_ws_pattern = re.compile(
+    r"trojan://[^@\s]+@[^:\s]+:\d+\?[^ \n]+"
+)
 
-def fetch_accounts():
+def decode_and_extract(line):
+    """Decode Base64, ekstrak Trojan WS beserta path (wf)"""
     accounts = []
-    if not os.path.exists(INPUT_FILE):
-        print(f"{INPUT_FILE} tidak ditemukan")
-        return accounts
-
-    with open(INPUT_FILE, "r") as f:
-        urls = [line.strip() for line in f if line.strip()]
-
-    for url in urls:
-        try:
-            r = requests.get(url, timeout=10)
-            r.raise_for_status()
-            content = r.text
-            for line in content.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    decoded = base64.b64decode(line).decode("utf-8")
-                except Exception:
-                    decoded = line
-                accounts.append(decoded)
-        except Exception as e:
-            print(f"Gagal ambil {url}: {e}")
+    try:
+        decoded_bytes = base64.b64decode(line.strip())
+        decoded_str = decoded_bytes.decode("utf-8")
+        matches = trojan_ws_pattern.findall(decoded_str)
+        for m in matches:
+            parsed = urlparse(m)
+            qs = parse_qs(parsed.query)
+            # Ambil path ws jika ada, misal ?type=ws&path=/wf
+            ws_path = qs.get("path", [""])[0]
+            # Simpan lengkap dengan path di output
+            accounts.append(f"{m} | path: {ws_path}")
+    except Exception:
+        pass
     return accounts
 
-def has_complete_ws_query(url):
-    parsed = urlparse(url)
-    qs = parse_qs(parsed.query)
-    required_keys = ["type", "host", "path"]
-    peer_present = "peer" in qs or "sni" in qs
-    type_ws = qs.get("type", [""])[0].lower() == "ws"
-    return all(k in qs for k in required_keys) and peer_present and type_ws
-
 def main():
-    accounts = fetch_accounts()
-    print(f"Total akun diambil dari raw GitHub: {len(accounts)}")
+    # Ambil konten dari GitHub
+    response = requests.get(github_raw_url)
+    if response.status_code != 200:
+        print(f"Gagal mengambil file dari GitHub: {response.status_code}")
+        return
 
-    filtered = [a for a in accounts if has_complete_ws_query(a)]
-    print(f"Total akun query lengkap & tipe WS: {len(filtered)}")
+    lines = response.text.splitlines()
+    valid_accounts = []
 
-    if filtered:
-        print("Daftar akun tersortir:")
-        for acc in filtered:
-            print(acc)
+    # Multi-threaded
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        results = executor.map(decode_and_extract, lines)
 
-    with open(OUTPUT_SORTED, "w") as f:
-        for acc in filtered:
-            f.write(acc + "\n")
+    for match_list in results:
+        if match_list:
+            valid_accounts.extend(match_list)
 
-    print(f"Hasil disimpan di {OUTPUT_SORTED}")
+    # Simpan hasil ke output.txt
+    with open("output.txt", "w", encoding="utf-8") as f:
+        for account in valid_accounts:
+            f.write(account + "\n")
+
+    print(f"Proses selesai! {len(valid_accounts)} akun WS ditemukan dan disimpan di output.txt")
 
 if __name__ == "__main__":
     main()
