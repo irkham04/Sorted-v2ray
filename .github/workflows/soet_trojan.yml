@@ -31,7 +31,7 @@ jobs:
 
       - name: Run Trojan sorter & speedtest
         run: |
-          python check_trojan_runner.py --input input.txt --sorted sorted.txt
+          python check_trojan_runner.py --input input.txt --sorted sorted.txt --batch-size 5 --delay 5 || true
 
       - name: Commit results
         uses: EndBug/add-and-commit@v9
