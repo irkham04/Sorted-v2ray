@@ -4,10 +4,12 @@ import subprocess
 import json
 import time
 import re
+import requests
+import base64
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True, help="File input")
+    parser.add_argument("--input", required=True, help="File input (URL raw GitHub)")
     parser.add_argument("--sorted", required=True, help="File output sorted")
     parser.add_argument("--active", required=True, help="File output active")
     parser.add_argument("--only-ws", action="store_true", help="Hanya ws")
@@ -15,6 +17,21 @@ def parse_args():
     parser.add_argument("--speedtest-bin", default="./speedtest-bin", help="Lokasi speedtest CLI")
     parser.add_argument("--delay", type=int, default=1, help="Delay antar speedtest (detik)")
     return parser.parse_args()
+
+def fetch_and_decode(url):
+    try:
+        r = requests.get(url.strip(), timeout=20)
+        r.raise_for_status()
+        content = r.text.strip()
+        try:
+            decoded = base64.b64decode(content).decode(errors="ignore")
+            return [l.strip() for l in decoded.splitlines() if l.strip()]
+        except Exception:
+            # jika tidak base64, anggap langsung plain text
+            return [l.strip() for l in content.splitlines() if l.strip()]
+    except Exception as e:
+        print(f"[ERROR] gagal fetch {url}: {e}")
+        return []
 
 def run_speedtest(ip, speedtest_bin, tested_ips, delay=1):
     if ip in tested_ips:
@@ -53,17 +70,22 @@ def extract_ip(url):
 
 def main():
     args = parse_args()
-    with open(args.input, "r") as f:
-        lines = [l.strip() for l in f if l.strip()]
+    all_accounts = []
 
-    accounts = [l for l in lines if not l.startswith("#")]
+    # fetch & decode semua URL di input.txt
+    with open(args.input) as f:
+        urls = [l.strip() for l in f if l.strip()]
+    for url in urls:
+        print(f"[INFO] Fetch dan decode: {url}", flush=True)
+        accounts = fetch_and_decode(url)
+        all_accounts.extend(accounts)
+
     tested_ips = set()
-
     sorted_lines = []
     active_lines = []
 
-    for idx, acc in enumerate(accounts):
-        print(f"[INFO] Memproses akun {idx+1}/{len(accounts)}", flush=True)
+    for idx, acc in enumerate(all_accounts):
+        print(f"[INFO] Memproses akun {idx+1}/{len(all_accounts)}", flush=True)
 
         if args.only_ws and "type=ws" not in acc.lower():
             continue
