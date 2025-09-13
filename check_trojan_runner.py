@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
-import argparse
-import base64
-import json
-import requests
-import subprocess
-import time
+import argparse, base64, requests, time, socket, sys
+from urllib.parse import urlparse
+import speedtest
 
 def decode_base64_url(url):
     try:
@@ -25,30 +22,38 @@ def is_valid_trojan(line):
         return False
     return True
 
-def run_speedtest(speedtest_bin="./speedtest"):
+def run_speedtest():
     try:
-        result = subprocess.check_output([speedtest_bin, "-f", "json"], timeout=60)
-        data = json.loads(result.decode("utf-8"))
-        isp = data.get("isp", "Unknown ISP")
-        server = data.get("server", {})
-        server_name = server.get("name", "Unknown")
-        server_loc = f"{server.get('location','?')}, {server.get('country','?')}"
-        ping = data.get("ping", {}).get("latency", "?")
+        st = speedtest.Speedtest()
+        st.get_best_server()
+        st.download()
+        st.upload()
+        server = st.results.server
+        ping = st.results.ping
+        isp = st.results.client["isp"]
+        server_name = server["name"]
+        server_loc = f"{server['location']}, {server['country']}"
         return f"# ISP: {isp} | Server: {server_name} ({server_loc}) | Ping: {ping} ms"
     except Exception as e:
         return f"# Speedtest gagal: {e}"
 
+def test_browsing(host, port=443, timeout=5):
+    try:
+        sock = socket.create_connection((host, port), timeout=timeout)
+        sock.close()
+        return "# Browsing: OK"
+    except Exception:
+        return "# Browsing: FAIL"
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--input", required=True, help="File input berisi URL raw GitHub")
-    p.add_argument("--sorted", default="sorted.txt", help="File output akun tersortir")
-    p.add_argument("--speedtest-bin", default="./speedtest", help="Path binary speedtest Ookla")
-    p.add_argument("--delay", type=int, default=10, help="Delay antar akun speedtest (detik)")
+    p.add_argument("--input", required=True)
+    p.add_argument("--sorted", default="sorted.txt")
+    p.add_argument("--delay", type=int, default=3)
     args = p.parse_args()
 
-    # ambil semua akun dari URL
     urls = []
-    with open(args.input, "r") as f:
+    with open(args.input) as f:
         urls = [line.strip() for line in f if line.strip()]
 
     all_accounts = []
@@ -65,33 +70,38 @@ def main():
     print(f"[INFO] sorted.txt dibuat: {len(valid_accounts)} akun valid")
 
     # tulis active.txt
-    tested_ips = {}  # IP -> hasil speedtest
+    tested_ips = {}
     with open("active.txt", "w") as f:
-        f.write("# Akun aktif dengan info speedtest (baris info diawali #)\n\n")
+        f.write("# Akun aktif dengan info speedtest dan browsing (baris info diawali #)\n\n")
         for i, acc in enumerate(valid_accounts, start=1):
             f.write(acc + "\n")
-            # ambil IP
             try:
                 ip = acc.split("@")[1].split(":")[0]
-            except Exception:
+            except:
                 ip = None
 
-            if ip and ip in tested_ips:
+            if ip in tested_ips:
                 f.write(tested_ips[ip] + "\n\n")
                 continue
 
-            # jalankan speedtest baru
-            info = run_speedtest(args.speedtest_bin)
-            f.write(info + "\n\n")
+            info = run_speedtest()
+
+            # test browsing host dari query sni atau host
+            parsed = urlparse(acc)
+            qs = dict([p.split("=") for p in parsed.query.split("&") if "=" in p])
+            host = qs.get("sni") or qs.get("host") or ip
+            browse_info = test_browsing(host)
+
+            full_info = info + "\n" + browse_info
+            f.write(full_info + "\n\n")
 
             if ip:
-                tested_ips[ip] = info
+                tested_ips[ip] = full_info
 
-            # delay tiap akun
             print(f"[INFO] Selesai akun {i}, delay {args.delay}s")
             time.sleep(args.delay)
 
-    print(f"[INFO] active.txt dibuat dengan speedtest tiap akun unik per IP")
+    print("[INFO] active.txt selesai dibuat")
 
 if __name__ == "__main__":
     main()
