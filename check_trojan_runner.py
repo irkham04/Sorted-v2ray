@@ -1,32 +1,40 @@
-name: Sort Trojan WS
+import re
+from urllib.parse import urlparse, parse_qs
 
-on:
-  workflow_dispatch:
+# File input dan output
+INPUT_FILE = "input.txt"
+OUTPUT_FILE = "output.txt"
 
-jobs:
-  sort-trojan:
-    runs-on: ubuntu-latest
+# Regex untuk mendeteksi Trojan WS
+TROJAN_PATTERN = re.compile(r"trojan://[^@\s]+@[^:\s]+:\d+\?[^ \n]+")
 
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v5
+# Query wajib ada
+REQUIRED_QUERIES = {"host", "password", "sni", "peer", "ws"}
 
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.11"
+def has_all_queries(url):
+    """Cek apakah Trojan memiliki semua query wajib"""
+    parsed = urlparse(url)
+    qs_keys = {k.lower() for k in parse_qs(parsed.query).keys()}
+    return REQUIRED_QUERIES.issubset(qs_keys)
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install requests
+def main():
+    valid_accounts = []
 
-    - name: Run Trojan WS Sorter
-      run: |
-        python check_trojan_runner.py
+    with open(INPUT_FILE, "r", encoding="utf-8") as f:
+        lines = f.readlines()
 
-    - name: Upload output.txt as artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: trojan-output
-        path: output.txt
+    for line in lines:
+        line = line.strip()
+        matches = TROJAN_PATTERN.findall(line)
+        for m in matches:
+            if has_all_queries(m):
+                valid_accounts.append(m)
+
+    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+        for account in valid_accounts:
+            f.write(account + "\n")
+
+    print(f"Selesai! {len(valid_accounts)} akun Trojan dengan query lengkap disimpan di {OUTPUT_FILE}")
+
+if __name__ == "__main__":
+    main()
