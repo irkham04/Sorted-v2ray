@@ -35,14 +35,18 @@ def run_speedtest_py(ip, timeout=10, delay=1):
     print(f"[INFO] Speedtest untuk IP {ip} ...")
     try:
         st = speedtest.Speedtest()
-        servers = st.get_servers([])
-        best = st.get_best_server(servers)
+        st.get_servers([])
 
-        # perbaikan: jika best float, langsung pakai sebagai ping
+        # Ambil server terbaik
+        best = st.get_best_server()
+
+        # Periksa tipe best
         if isinstance(best, dict):
             ping = best.get('latency', '?')
-        else:
+        elif isinstance(best, (float, int)):
             ping = best
+        else:
+            ping = "?"
 
         isp = st.results.client.get('isp', 'Unknown ISP')
         print(f"# ISP: {isp} | Ping: {ping} ms")
