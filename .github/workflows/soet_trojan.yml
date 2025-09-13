@@ -18,22 +18,33 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Upgrade pip
-        run: python -m pip install --upgrade pip
-
       - name: Install dependencies
-        run: |
-          pip install --quiet requests speedtest-cli
+        run: pip install --quiet requests
 
-      - name: Run Trojan sorter & test browsing
-        run: python check_trojan_runner.py --input input.txt --sorted sorted.txt --delay 3 || true
+      - name: Install Ookla Speedtest CLI
+        run: |
+          curl -sSL https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz -o speedtest.tgz
+          tar -xzf speedtest.tgz
+          mv speedtest ./speedtest-bin
+          chmod +x ./speedtest-bin
+
+      - name: Run Trojan sorter & speedtest
+        run: |
+          python check_trojan_runner.py \
+            --input input.txt \
+            --sorted sorted.txt \
+            --active active.txt \
+            --only-ws \
+            --require-sni-host \
+            --speedtest-bin ./speedtest-bin \
+            --delay 1 || true
 
       - name: Commit results
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add sorted.txt active.txt
-          git commit -m "chore: update sorted.txt & active.txt (workflow)" --allow-empty
+          git commit -m "update: sorted & active trojan accounts with speedtest" --allow-empty
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
