@@ -1,5 +1,6 @@
 import os
 import base64
+import requests
 import websocket
 from urllib.parse import urlparse, parse_qs
 
@@ -13,23 +14,34 @@ TIMEOUT = 20
 os.makedirs("results", exist_ok=True)
 
 # --------------------------
-# Ambil akun dari file input
+# Ambil akun dari raw GitHub URL
 # --------------------------
 def fetch_accounts():
     accounts = []
     if not os.path.exists(INPUT_FILE):
         print(f"{INPUT_FILE} tidak ditemukan")
         return accounts
+
     with open(INPUT_FILE, "r") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                decoded = base64.b64decode(line).decode("utf-8")
-            except Exception:
-                decoded = line
-            accounts.extend([l.strip() for l in decoded.splitlines() if l.strip()])
+        urls = [line.strip() for line in f if line.strip()]
+
+    for url in urls:
+        try:
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            content = r.text
+            for line in content.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    decoded = base64.b64decode(line).decode("utf-8")
+                except Exception:
+                    decoded = line
+                accounts.append(decoded)
+        except Exception as e:
+            print(f"Gagal ambil {url}: {e}")
+
     return accounts
 
 # ----------------------------------------
@@ -38,6 +50,8 @@ def fetch_accounts():
 def has_complete_query(url):
     parsed = urlparse(url)
     qs = parse_qs(parsed.query)
+    # DEBUG: tampilkan query yang terbaca
+    # print("DEBUG QUERY:", qs)
     required_keys = ["type", "host", "path"]
     peer_present = "peer" in qs or "sni" in qs
     return all(k in qs for k in required_keys) and peer_present
