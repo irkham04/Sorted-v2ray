@@ -1,5 +1,6 @@
 import os
 import base64
+import requests
 from urllib.parse import urlparse, parse_qs
 
 INPUT_FILE = "input.txt"
@@ -12,16 +13,26 @@ def fetch_accounts():
     if not os.path.exists(INPUT_FILE):
         print(f"{INPUT_FILE} tidak ditemukan")
         return accounts
+
     with open(INPUT_FILE, "r") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                decoded = base64.b64decode(line).decode("utf-8")
-            except Exception:
-                decoded = line
-            accounts.append(decoded)
+        urls = [line.strip() for line in f if line.strip()]
+
+    for url in urls:
+        try:
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            content = r.text
+            for line in content.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    decoded = base64.b64decode(line).decode("utf-8")
+                except Exception:
+                    decoded = line
+                accounts.append(decoded)
+        except Exception as e:
+            print(f"Gagal ambil {url}: {e}")
     return accounts
 
 def has_complete_ws_query(url):
