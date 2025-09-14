@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import argparse, base64, requests, sys, time
-from urllib.parse import urlparse, parse_qs, urlunparse
+from urllib.parse import urlparse, parse_qs
 
 try:
     import websocket
@@ -47,8 +47,7 @@ def parse_trojan_ws(line, require_sni_host=False):
 
 
 def ws_check(account, delay=1, timeout=5):
-    # Ubah domain sebelum port menjadi quiz.vidio.com
-    ws_url = f"ws://quiz.vidio.com:{account['port']}{account['path']}"
+    ws_url = f"ws://{account['host']}:{account['port']}{account['path']}"
     try:
         ws = websocket.create_connection(ws_url, timeout=timeout, sslopt={"server_hostname": account["sni"]})
         ws.close()
@@ -71,7 +70,6 @@ def main():
 
     all_accounts = []
 
-    # Fetch raw accounts
     with open(args.input) as f:
         for url in f:
             url = url.strip()
@@ -89,7 +87,7 @@ def main():
     for idx, acc in enumerate(all_accounts, start=1):
         print(f"[INFO] Memproses akun {idx}/{len(all_accounts)}")
         ok, info = ws_check(acc, delay=args.delay, timeout=args.timeout)
-        # Buat URL dengan domain quiz.vidio.com sebelum port
+        # Output: ganti host sebelum port menjadi quiz.vidio.com
         url = f"{acc['scheme']}://{acc['user']}@quiz.vidio.com:{acc['port']}?{acc['query']}#{acc['fragment']}"
         if ok:
             sorted_lines.append(f"{url}\n# Status: Aktif | Ping: {info} ms\n")
