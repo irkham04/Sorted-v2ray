@@ -50,6 +50,6 @@ jobs:
           author_name: github-actions[bot]
           author_email: 41898282+github-actions[bot]@users.noreply.github.com
           message: "chore: update sorted.txt & active.txt (WS check)"
-          add: 'sorted.txt,active.txt'
+          add: 'sorted.txt active.txt'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
