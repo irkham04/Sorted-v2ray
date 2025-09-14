@@ -8,7 +8,6 @@ except ImportError:
     print("Install websocket-client package!", file=sys.stderr)
     sys.exit(1)
 
-
 def fetch_and_decode(url, timeout=20):
     try:
         text = requests.get(url, timeout=timeout).text.strip()
@@ -19,7 +18,6 @@ def fetch_and_decode(url, timeout=20):
     except Exception as e:
         print(f"[ERROR] gagal fetch {url}: {e}", file=sys.stderr)
         return ""
-
 
 def parse_trojan_ws(line, require_sni_host=False):
     if not line.lower().startswith("trojan://"):
@@ -45,7 +43,6 @@ def parse_trojan_ws(line, require_sni_host=False):
         "fragment": parsed.fragment
     }
 
-
 def ws_check(account, delay=1, timeout=5):
     ws_url = f"ws://{account['host']}:{account['port']}{account['path']}"
     try:
@@ -56,7 +53,6 @@ def ws_check(account, delay=1, timeout=5):
     except Exception as e:
         time.sleep(delay)
         return False, str(e)
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -83,6 +79,7 @@ def main():
 
     sorted_lines = []
     active_lines = []
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
 
     for idx, acc in enumerate(all_accounts, start=1):
         print(f"[INFO] Memproses akun {idx}/{len(all_accounts)}")
@@ -90,10 +87,12 @@ def main():
         # Output: ganti host sebelum port menjadi quiz.vidio.com
         url = f"{acc['scheme']}://{acc['user']}@quiz.vidio.com:{acc['port']}?{acc['query']}#{acc['fragment']}"
         if ok:
-            sorted_lines.append(f"{url}\n# Status: Aktif | Ping: {info} ms\n")
-            active_lines.append(f"{url}\n# Status: Aktif | Ping: {info} ms\n")
+            line = f"{url}\n# Status: Aktif | Ping: {info} ms | Checked: {timestamp}\n"
+            sorted_lines.append(line)
+            active_lines.append(line)
         else:
-            sorted_lines.append(f"{url}\n# Status: Tidak aktif | Info: {info}\n")
+            line = f"{url}\n# Status: Tidak aktif | Info: {info} | Checked: {timestamp}\n"
+            sorted_lines.append(line)
 
     with open(args.sorted, "w") as f:
         f.writelines(sorted_lines)
@@ -101,7 +100,6 @@ def main():
         f.writelines(active_lines)
 
     print(f"[INFO] Total akun WS: {len(all_accounts)}, Aktif: {len(active_lines)}")
-
 
 if __name__ == "__main__":
     main()
