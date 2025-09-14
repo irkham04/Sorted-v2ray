@@ -1,9 +1,11 @@
 name: Sort & Check Trojan WS
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch: {}        # manual trigger
   push:
     branches: [ main ]
+  schedule:
+    - cron: "0 0 */3 * *"     # setiap 3 hari pukul 00:00 UTC
 
 jobs:
   sort_ws:
@@ -33,7 +35,14 @@ jobs:
             --active active.txt \
             --require-sni-host \
             --delay 1 \
-            --timeout 5 || true
+            --timeout 5
+
+      - name: Show output for debug
+        run: |
+          echo "==== sorted.txt ===="
+          cat sorted.txt
+          echo "==== active.txt ===="
+          cat active.txt
 
       - name: Commit sorted & active output
         uses: EndBug/add-and-commit@v9
