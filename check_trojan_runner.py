@@ -85,7 +85,7 @@ def main():
         print(f"[INFO] Memproses akun {idx}/{len(all_accounts)}")
         ok, info = ws_check(acc, delay=args.delay, timeout=args.timeout)
         # Output: ganti host sebelum port menjadi quiz.vidio.com
-        url = f"{acc['scheme']}://{acc['user']}@quiz.vidio.com:{acc['port']}?{acc['query']}#{acc['fragment']}"
+        url = f"{acc['scheme']}://{acc['user']}@104.18.1.196:{acc['port']}?{acc['query']}#{acc['fragment']}"
         if ok:
             line = f"{url}\n# Status: Aktif | Ping: {info} ms | Checked: {timestamp}\n"
             sorted_lines.append(line)
